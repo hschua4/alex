@@ -1,0 +1,11 @@
+{
+  "name": "alex",
+  "version": "0.0.0",
+  "private": true,
+  "packageManager": "pnpm@9.11.0",
+  "scripts": {
+    "dev": "pnpm --filter @alex/web dev",
+    "build": "pnpm --filter @alex/web build",
+    "lint": "pnpm -r lint"
+  }
+}
