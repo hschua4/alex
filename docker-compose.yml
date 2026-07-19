@@ -1,0 +1,24 @@
+# Dev-only Postgres for Alex, pinned to pgvector/pgvector:pg16 to match the
+# swapped shared prod image exactly (ADR-0008, CONTEXT §8 dev/prod parity).
+services:
+  db:
+    image: pgvector/pgvector:pg16
+    container_name: alex-db
+    environment:
+      POSTGRES_USER: alex
+      POSTGRES_PASSWORD: alex
+      POSTGRES_DB: alex
+    ports:
+      # Host 5434 avoids clashing with other Postgres instances already bound to
+      # 5432/5433 on this box. Container still listens on 5432.
+      - "5434:5432"
+    volumes:
+      - alex-pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U alex -d alex"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  alex-pgdata:

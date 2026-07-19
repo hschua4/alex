@@ -1,6 +1,7 @@
 import { LayoutGrid, Search, Settings } from "lucide-react"
 import { NavLink } from "react-router-dom"
 
+import { useHealth } from "@/lib/use-health"
 import { cn } from "@/lib/utils"
 
 /** Fixed 60px navigation rail — dark in both themes. */
@@ -16,11 +17,49 @@ export function AppRail() {
 
       <div className="flex-1" />
 
+      <RailHealthDot />
       <RailButton label="Settings" icon={Settings} />
       <div className="mt-1 flex size-[34px] items-center justify-center rounded-full text-[13px] font-bold text-white [background:oklch(0.62_0.13_45)]">
         AK
       </div>
     </nav>
+  )
+}
+
+/** Live API/DB connection indicator, driven by the real /api/health RPC call. */
+function RailHealthDot() {
+  const { data, isLoading, isError } = useHealth()
+  const ok = data?.status === "ok"
+  const state = isLoading
+    ? "pending"
+    : isError || !ok
+      ? "down"
+      : "up"
+  const color =
+    state === "up"
+      ? "var(--success)"
+      : state === "down"
+        ? "var(--destructive)"
+        : "var(--warning)"
+  const title =
+    state === "up"
+      ? `API connected · schema ${data?.schemaVersion ?? "?"} · ${data?.latencyMs ?? "?"}ms`
+      : state === "down"
+        ? "API unreachable"
+        : "Checking API…"
+
+  return (
+    <div
+      className={itemBase}
+      title={title}
+      aria-label={title}
+      role="status"
+    >
+      <span
+        className="size-2.5 rounded-full transition-colors"
+        style={{ background: color }}
+      />
+    </div>
   )
 }
 

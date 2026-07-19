@@ -12,8 +12,10 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@alex/api": "workspace:*",
     "@tailwindcss/vite": "^4",
     "@tanstack/react-query": "^5.62.0",
+    "hono": "^4.6.14",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "lucide-react": "^0.470.0",

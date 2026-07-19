@@ -4,8 +4,15 @@
   "private": true,
   "packageManager": "pnpm@9.11.0",
   "scripts": {
-    "dev": "pnpm --filter @alex/web dev",
+    "dev": "pnpm --parallel --filter @alex/api --filter @alex/web dev",
     "build": "pnpm --filter @alex/web build",
-    "lint": "pnpm -r lint"
+    "start": "pnpm --filter @alex/api start",
+    "db:generate": "pnpm --filter @alex/db db:generate",
+    "db:migrate": "pnpm --filter @alex/db db:migrate",
+    "db:up": "docker compose up -d db",
+    "db:down": "docker compose down",
+    "lint": "pnpm -r lint",
+    "typecheck": "pnpm -r typecheck",
+    "test": "pnpm -r test"
   }
 }
