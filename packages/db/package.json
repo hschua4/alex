@@ -24,6 +24,7 @@
     "drizzle-kit": "^0.28.1",
     "tsx": "^4.19.2",
     "typescript": "~6",
-    "vitest": "^2.1.8"
+    "vitest": "^2.1.8",
+    "kysely": "^0.29.4"
   }
 }

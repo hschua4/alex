@@ -9,6 +9,7 @@
     "start": "pnpm --filter @alex/api start",
     "db:generate": "pnpm --filter @alex/db db:generate",
     "db:migrate": "pnpm --filter @alex/db db:migrate",
+    "invite": "pnpm --filter @alex/api invite",
     "db:up": "docker compose up -d db",
     "db:down": "docker compose down",
     "lint": "pnpm -r lint",

@@ -1,8 +1,16 @@
-import { LayoutGrid, Search, Settings } from "lucide-react"
-import { NavLink } from "react-router-dom"
+import { LayoutGrid, LogOut, Search, Settings } from "lucide-react"
+import { NavLink, useNavigate } from "react-router-dom"
 
+import { signOut, useSession } from "@/lib/auth-client"
 import { useHealth } from "@/lib/use-health"
 import { cn } from "@/lib/utils"
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu"
 
 /** Fixed 60px navigation rail — dark in both themes. */
 export function AppRail() {
@@ -19,11 +27,57 @@ export function AppRail() {
 
       <RailHealthDot />
       <RailButton label="Settings" icon={Settings} />
-      <div className="mt-1 flex size-[34px] items-center justify-center rounded-full text-[13px] font-bold text-white [background:oklch(0.62_0.13_45)]">
-        AK
-      </div>
+      <RailUser />
     </nav>
   )
+}
+
+/** Signed-in identity + sign-out — proof the workspace is this user's own. */
+function RailUser() {
+  const { data: session } = useSession()
+  const navigate = useNavigate()
+  const user = session?.user
+
+  async function handleSignOut() {
+    await signOut()
+    navigate("/login", { replace: true })
+  }
+
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger
+        title={user?.email ?? "Account"}
+        aria-label={user ? `Signed in as ${user.email}` : "Account"}
+        className="mt-1 flex size-[34px] items-center justify-center rounded-full text-[13px] font-bold text-white outline-none focus-visible:ring-2 focus-visible:ring-white/60 [background:oklch(0.62_0.13_45)]"
+      >
+        {initials(user?.name, user?.email)}
+      </DropdownMenuTrigger>
+      <DropdownMenuContent side="right" align="end" sideOffset={8}>
+        <div className="max-w-56 px-1.5 py-1">
+          <p className="truncate text-sm font-medium">
+            {user?.name ?? "Signed in"}
+          </p>
+          <p className="truncate text-xs text-muted-foreground">
+            {user?.email}
+          </p>
+        </div>
+        <DropdownMenuSeparator />
+        <DropdownMenuItem onClick={handleSignOut}>
+          <LogOut />
+          Sign out
+        </DropdownMenuItem>
+      </DropdownMenuContent>
+    </DropdownMenu>
+  )
+}
+
+/** Up-to-two-letter avatar initials from a name, falling back to the email. */
+function initials(name?: string, email?: string): string {
+  const source = name?.trim() || email?.split("@")[0] || "?"
+  const parts = source.split(/\s+/).filter(Boolean)
+  const letters =
+    parts.length >= 2 ? parts[0][0] + parts[1][0] : source.slice(0, 2)
+  return letters.toUpperCase()
 }
 
 /** Live API/DB connection indicator, driven by the real /api/health RPC call. */
