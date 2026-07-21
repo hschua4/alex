@@ -20,5 +20,41 @@ services:
       timeout: 5s
       retries: 10
 
+  # Dev-only S3-compatible store for original uploads, standing in for R2
+  # (ADR-0007). The app talks to it via the same @aws-sdk/client-s3 path it uses
+  # for R2 in prod — path-style routing, custom endpoint.
+  minio:
+    image: minio/minio:latest
+    container_name: alex-minio
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: alex
+      MINIO_ROOT_PASSWORD: alexsecret
+    ports:
+      # 9000 API, 9001 web console. High ports to avoid clashes on the box.
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - alex-minio:/data
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # One-shot: create the bucket the app expects, then exit.
+  minio-init:
+    image: minio/mc:latest
+    depends_on:
+      minio:
+        condition: service_healthy
+    entrypoint: >
+      /bin/sh -c "
+      mc alias set local http://minio:9000 alex alexsecret &&
+      mc mb --ignore-existing local/alex-documents &&
+      echo 'bucket alex-documents ready'
+      "
+
 volumes:
   alex-pgdata:
+  alex-minio:

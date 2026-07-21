@@ -11,6 +11,7 @@
     "db:migrate": "pnpm --filter @alex/db db:migrate",
     "invite": "pnpm --filter @alex/api invite",
     "db:up": "docker compose up -d db",
+    "services:up": "docker compose up -d db minio minio-init",
     "db:down": "docker compose down",
     "lint": "pnpm -r lint",
     "typecheck": "pnpm -r typecheck",

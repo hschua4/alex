@@ -1,5 +1,15 @@
 import { sql } from "drizzle-orm"
-import { boolean, index, pgTable, text, timestamp } from "drizzle-orm/pg-core"
+import {
+  boolean,
+  index,
+  integer,
+  pgEnum,
+  pgTable,
+  text,
+  timestamp,
+  unique,
+  vector,
+} from "drizzle-orm/pg-core"
 
 /**
  * `app_meta` is a single-row table the health route reads to prove a real query
@@ -48,6 +58,94 @@ export const project = pgTable(
 
 export type Project = typeof project.$inferSelect
 export type NewProject = typeof project.$inferInsert
+
+/**
+ * Ingestion lifecycle (CONTEXT §5, ADR-0006). A row is born `processing`: the
+ * original is stored in R2 *before* the row exists, so there is no `uploading`
+ * state to model here. Retrieval only ever sees `indexed` rows, so a processing
+ * or failed document is never half-searched.
+ */
+export const documentStatus = pgEnum("document_status", [
+  "processing",
+  "indexed",
+  "failed",
+])
+
+/**
+ * A document is an uploaded file (PDF/DOCX) inside a project (CONTEXT §3). The
+ * original bytes live in R2 (`storageKey`, ADR-0007); this row tracks the
+ * ingestion `status` and, on failure, a surfaced `errorMessage`. Like every
+ * product table it carries `userId` and is scoped by it directly — a document id
+ * alone never authorizes access. `pageCount` is captured at the boundary (the
+ * ADR-0011 page cap) and reused by the UI.
+ */
+export const document = pgTable(
+  "document",
+  {
+    id: text("id").primaryKey(),
+    projectId: text("project_id")
+      .notNull()
+      .references(() => project.id, { onDelete: "cascade" }),
+    userId: text("user_id").notNull(),
+    filename: text("filename").notNull(),
+    fileType: text("file_type").notNull(),
+    sizeBytes: integer("size_bytes").notNull(),
+    pageCount: integer("page_count").notNull(),
+    storageKey: text("storage_key").notNull(),
+    status: documentStatus("status").notNull().default("processing"),
+    errorMessage: text("error_message"),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .default(sql`now()`),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .default(sql`now()`),
+  },
+  // The list endpoint reads by owner within a project; the dashboard counts by
+  // owner. One composite index serves both.
+  (t) => [index("document_user_project_idx").on(t.userId, t.projectId)],
+)
+
+export type Document = typeof document.$inferSelect
+export type NewDocument = typeof document.$inferInsert
+
+/**
+ * A chunk is a ~600-token slice of a document — the unit of retrieval (CONTEXT
+ * §3, ADR-0004). It stores the text, its 1536-d embedding, and provenance (page,
+ * char offset, chunk index) so a citation can point back to the source passage.
+ *
+ * `UNIQUE(document_id, chunk_index)` is a belt-and-suspenders guard on the
+ * idempotent delete-then-insert re-ingestion (ADR-0006); the HNSW index over the
+ * embedding (cosine ops) backs top-k retrieval (ADR-0008). Chunks cascade-delete
+ * with their document.
+ */
+export const chunk = pgTable(
+  "chunk",
+  {
+    id: text("id").primaryKey(),
+    documentId: text("document_id")
+      .notNull()
+      .references(() => document.id, { onDelete: "cascade" }),
+    content: text("content").notNull(),
+    embedding: vector("embedding", { dimensions: 1536 }).notNull(),
+    page: integer("page").notNull(),
+    charOffset: integer("char_offset").notNull(),
+    chunkIndex: integer("chunk_index").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .default(sql`now()`),
+  },
+  (t) => [
+    unique("chunk_document_id_chunk_index_uq").on(t.documentId, t.chunkIndex),
+    index("chunk_embedding_hnsw_idx").using(
+      "hnsw",
+      t.embedding.op("vector_cosine_ops"),
+    ),
+  ],
+)
+
+export type Chunk = typeof chunk.$inferSelect
+export type NewChunk = typeof chunk.$inferInsert
 
 /**
  * Auth tables owned by better-auth (ADR-0002). Column keys are camelCase to
