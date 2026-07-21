@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react"
-import { ArrowUp, FileText, Paperclip, Plus, X } from "lucide-react"
+import { ArrowUp, FileText, Loader2, Paperclip, Plus, X } from "lucide-react"
 import { Link, Navigate, useParams } from "react-router-dom"
 
 import { DocBadge } from "@/components/doc-badge"
@@ -13,17 +13,17 @@ import {
   getChats,
   getDocuments,
   getMessages,
-  getProject,
   type Chat,
   type Citation,
   type Doc,
   type Message,
 } from "@/lib/mock-data"
+import { useProject, type Project } from "@/lib/projects"
 import { cn } from "@/lib/utils"
 
 export function ChatScreen() {
   const { projectId = "", chatId } = useParams()
-  const project = getProject(projectId)
+  const { data: project, isPending } = useProject(projectId)
   const chats = getChats(projectId)
   const activeChatId = chatId ?? chats[0]?.id ?? ""
 
@@ -41,6 +41,13 @@ export function ChatScreen() {
     [messages]
   )
 
+  if (isPending) {
+    return (
+      <div className="flex flex-1 items-center justify-center bg-secondary">
+        <Loader2 className="size-6 animate-spin text-muted-foreground" />
+      </div>
+    )
+  }
   if (!project) return <Navigate to="/" replace />
 
   function toggleDoc(id: string) {
@@ -112,7 +119,7 @@ function ChatHistorySidebar({
   chats,
   activeChatId,
 }: {
-  project: NonNullable<ReturnType<typeof getProject>>
+  project: Project
   projectId: string
   chats: Chat[]
   activeChatId: string

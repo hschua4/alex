@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm"
-import { boolean, pgTable, text, timestamp } from "drizzle-orm/pg-core"
+import { boolean, index, pgTable, text, timestamp } from "drizzle-orm/pg-core"
 
 /**
  * `app_meta` is a single-row table the health route reads to prove a real query
@@ -16,6 +16,38 @@ export const appMeta = pgTable("app_meta", {
 })
 
 export type AppMeta = typeof appMeta.$inferSelect
+
+/**
+ * A project is a user-owned workspace that will hold documents and chat sessions
+ * (CONTEXT.md §3, ADR-0001). This is the first product table: every row carries
+ * a `userId`, and every query filters by it — access to a project is authorized
+ * against the authenticated user, never inferred from the id alone.
+ *
+ * The doc/chat counts the dashboard shows are *derived* from the (later) document
+ * and chat_session tables, not stored here, so they can't drift from reality.
+ * `userId` is not a foreign key on purpose: the `user` table is owned by
+ * better-auth (see below), so we scope by value and let auth own its own schema.
+ */
+export const project = pgTable(
+  "project",
+  {
+    id: text("id").primaryKey(),
+    userId: text("user_id").notNull(),
+    name: text("name").notNull(),
+    description: text("description").notNull().default(""),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .default(sql`now()`),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .default(sql`now()`),
+  },
+  // The list endpoint filters every read by owner; index it.
+  (t) => [index("project_user_id_idx").on(t.userId)],
+)
+
+export type Project = typeof project.$inferSelect
+export type NewProject = typeof project.$inferInsert
 
 /**
  * Auth tables owned by better-auth (ADR-0002). Column keys are camelCase to

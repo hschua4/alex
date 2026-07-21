@@ -1,7 +1,7 @@
 import { ChevronLeft } from "lucide-react"
 import { Link } from "react-router-dom"
 
-import type { Project } from "@/lib/mock-data"
+import type { Project } from "@/lib/projects"
 
 /** Shared top of the project-scoped sidebar: back link + name + counts. */
 export function ProjectSidebarHeader({ project }: { project: Project }) {

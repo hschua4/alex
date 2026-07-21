@@ -1,10 +1,10 @@
 /**
  * Typed mock data for the Alex UI shell.
  *
- * Shapes mirror the domain in CONTEXT.md (project / document / chat_session /
- * message / message_citation). This module is the single seam to replace with
- * the Hono RPC client (`hc<AppType>`) once the API exists — components only ever
- * read from the typed accessors below, never inline literals.
+ * Shapes mirror the domain in CONTEXT.md (document / chat_session / message /
+ * message_citation). Projects have moved to the live API (`lib/projects.ts`);
+ * documents, chats, and messages are still mocked here and get their own slices
+ * (#4/#5). Components only ever read from the typed accessors below.
  */
 
 export type DocType = "PDF" | "DOCX"
@@ -12,16 +12,6 @@ export type DocStatus = "indexed" | "processing" | "failed"
 
 /** Decorative per-hue tint used for project icons and file-type badges. */
 export type Tint = { bg: string; fg: string }
-
-export type Project = {
-  id: string
-  name: string
-  description: string
-  docCount: number
-  chatCount: number
-  updatedLabel: string
-  tint: Tint
-}
 
 export type Doc = {
   id: string
@@ -55,15 +45,6 @@ export type Message =
 
 // ── decorative palettes ─────────────────────────────────────────────────────
 
-const PROJECT_TINTS: Tint[] = [
-  { bg: "oklch(0.94 0.05 264)", fg: "oklch(0.5 0.17 264)" },
-  { bg: "oklch(0.94 0.05 160)", fg: "oklch(0.48 0.13 160)" },
-  { bg: "oklch(0.94 0.05 25)", fg: "oklch(0.5 0.16 25)" },
-  { bg: "oklch(0.94 0.05 300)", fg: "oklch(0.5 0.15 300)" },
-  { bg: "oklch(0.94 0.05 65)", fg: "oklch(0.5 0.14 65)" },
-  { bg: "oklch(0.94 0.05 200)", fg: "oklch(0.48 0.13 200)" },
-]
-
 export const DOC_TINTS: Record<DocType, Tint> = {
   PDF: { bg: "oklch(0.94 0.05 25)", fg: "oklch(0.5 0.19 25)" },
   DOCX: { bg: "oklch(0.93 0.04 245)", fg: "oklch(0.48 0.17 245)" },
@@ -79,63 +60,6 @@ export const STATUS_META: Record<
 }
 
 // ── seed data ───────────────────────────────────────────────────────────────
-
-export const projects: Project[] = [
-  {
-    id: "llm-eval",
-    name: "LLM Evaluation Research",
-    description: "Benchmarks, human eval rubrics, and faithfulness studies.",
-    docCount: 8,
-    chatCount: 5,
-    updatedLabel: "2h ago",
-    tint: PROJECT_TINTS[0],
-  },
-  {
-    id: "q3-strategy",
-    name: "Q3 Product Strategy",
-    description: "Roadmap inputs, OKRs, and competitive positioning.",
-    docCount: 12,
-    chatCount: 9,
-    updatedLabel: "Yesterday",
-    tint: PROJECT_TINTS[1],
-  },
-  {
-    id: "legal",
-    name: "Legal & Compliance",
-    description: "Contracts, DPAs, and regulatory guidance documents.",
-    docCount: 23,
-    chatCount: 4,
-    updatedLabel: "3d ago",
-    tint: PROJECT_TINTS[2],
-  },
-  {
-    id: "interviews",
-    name: "Customer Interviews",
-    description: "Transcripts and synthesis from 40+ discovery calls.",
-    docCount: 17,
-    chatCount: 11,
-    updatedLabel: "1w ago",
-    tint: PROJECT_TINTS[3],
-  },
-  {
-    id: "competitive",
-    name: "Competitive Analysis",
-    description: "Teardown notes and pricing sheets across 6 vendors.",
-    docCount: 6,
-    chatCount: 2,
-    updatedLabel: "2w ago",
-    tint: PROJECT_TINTS[4],
-  },
-  {
-    id: "onboarding",
-    name: "Onboarding Redesign",
-    description: "Support tickets, session recordings, and UX audits.",
-    docCount: 9,
-    chatCount: 6,
-    updatedLabel: "3w ago",
-    tint: PROJECT_TINTS[5],
-  },
-]
 
 export const documentsByProject: Record<string, Doc[]> = {
   "llm-eval": [
@@ -185,10 +109,6 @@ export const messagesByChat: Record<string, Message[]> = {
 }
 
 // ── accessors (the seam a real API client would replace) ────────────────────
-
-export function getProject(projectId: string): Project | undefined {
-  return projects.find((p) => p.id === projectId)
-}
 
 export function getDocuments(projectId: string): Doc[] {
   return documentsByProject[projectId] ?? []

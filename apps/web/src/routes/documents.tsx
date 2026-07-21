@@ -1,20 +1,17 @@
-import { FileText, MessageSquare, MoreVertical, Upload } from "lucide-react"
+import { FileText, Loader2, MessageSquare, MoreVertical, Upload } from "lucide-react"
 import { Link, Navigate, useParams } from "react-router-dom"
 
 import { DocBadge } from "@/components/doc-badge"
 import { ProjectSidebarHeader } from "@/components/project-sidebar-header"
 import { Button } from "@/components/ui/button"
-import {
-  getDocuments,
-  getProject,
-  STATUS_META,
-  type Doc,
-} from "@/lib/mock-data"
+import { getDocuments, STATUS_META, type Doc } from "@/lib/mock-data"
+import { useProject } from "@/lib/projects"
 import { cn } from "@/lib/utils"
 
 export function DocumentsScreen() {
   const { projectId = "" } = useParams()
-  const project = getProject(projectId)
+  const { data: project, isPending } = useProject(projectId)
+  if (isPending) return <ProjectLoading />
   if (!project) return <Navigate to="/" replace />
   const documents = getDocuments(projectId)
 
@@ -54,6 +51,14 @@ export function DocumentsScreen() {
           <DocumentsTable documents={documents} />
         </div>
       </div>
+    </div>
+  )
+}
+
+function ProjectLoading() {
+  return (
+    <div className="flex flex-1 items-center justify-center">
+      <Loader2 className="size-6 animate-spin text-muted-foreground" />
     </div>
   )
 }
