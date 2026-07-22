@@ -1,31 +1,54 @@
 import { zValidator } from "@hono/zod-validator"
+import { streamText, type LanguageModel } from "ai"
 import { eq } from "drizzle-orm"
 import { Hono } from "hono"
 import { createMiddleware } from "hono/factory"
+import { streamSSE } from "hono/streaming"
 import { z } from "zod"
 
 import {
   appMeta,
   countDocumentsByProject,
+  createAssistantMessage,
   createDocument,
   createProject,
+  createSession,
+  createUserMessage,
   deleteDocument,
   getDocument,
   getProject,
+  getSession,
   listDocuments,
+  listMessages,
   listProjects,
+  listSessions,
   markProcessing,
+  retrieveCandidates,
+  touchSession,
+  type ChatSession,
   type Database,
   type Document,
+  type MessageWithCitations,
   type Project,
 } from "@alex/db"
 
 import type { Auth } from "./auth.ts"
 import {
+  ANSWER_MODELS,
+  buildPrompt,
+  DEFAULT_ANSWER_MODEL,
+  isAllowedModel,
+  OVER_FETCH,
+  rankCandidates,
+  SYSTEM_PROMPT,
+  validateCitations,
+} from "./chat/index.ts"
+import {
   MAX_PAGES,
   MAX_UPLOAD_BYTES,
   pdfPageCount,
   resolveFileType,
+  type Embedder,
   type FileType,
   type ObjectStore,
 } from "./ingest/index.ts"
@@ -50,6 +73,14 @@ export type ApiDeps = {
   store: ObjectStore
   /** Enqueue an ingestion job for a document (ADR-0006). */
   enqueueIngest: (documentId: string) => Promise<void>
+  /** Embeds the query for retrieval (CONTEXT §4.4) — faked in tests (ADR-0012). */
+  embedder: Embedder
+  /**
+   * Resolves a validated answer-model id to a `LanguageModel` (ADR-0010). The id
+   * is checked against the server allowlist before this is called; tests inject a
+   * factory returning a mock model so no real generation runs in CI.
+   */
+  answerModel: (modelId: string) => LanguageModel
 }
 
 /** Node has a global `File` (undici); narrow a parsed field to it. */
@@ -129,6 +160,92 @@ function toDocumentDto(row: Document): DocumentDto {
   }
 }
 
+/** The client-facing shape of a chat session — the history sidebar entry. */
+export type ChatSessionDto = {
+  id: string
+  title: string
+  createdAt: string
+  updatedAt: string
+}
+
+function toSessionDto(row: ChatSession): ChatSessionDto {
+  return {
+    id: row.id,
+    title: row.title,
+    createdAt: row.createdAt.toISOString(),
+    updatedAt: row.updatedAt.toISOString(),
+  }
+}
+
+/**
+ * The client-facing shape of a citation — the numbered passage the sources panel
+ * renders (ADR-0005). Snapshotted at answer time; the soft `chunkId` reference
+ * never leaves the API.
+ */
+export type CitationDto = {
+  n: number
+  documentId: string
+  documentName: string
+  page: number
+  chunkIndex: number
+  snippet: string
+}
+
+/**
+ * The client-facing shape of a message. User turns carry their per-turn
+ * `selectedDocumentIds`; assistant turns carry the `modelId` that produced them,
+ * their terminal `status`, and their validated `citations`.
+ */
+export type MessageDto = {
+  id: string
+  role: "user" | "assistant"
+  content: string
+  status: "complete" | "stopped" | "failed"
+  selectedDocumentIds: string[]
+  modelId: string | null
+  citations: CitationDto[]
+  createdAt: string
+}
+
+function toMessageDto(row: MessageWithCitations): MessageDto {
+  return {
+    id: row.id,
+    role: row.role,
+    content: row.content,
+    status: row.status,
+    selectedDocumentIds: row.selectedDocumentIds,
+    modelId: row.modelId,
+    citations: row.citations
+      .map((c) => ({
+        n: c.n,
+        documentId: c.documentId,
+        documentName: c.documentName,
+        page: c.page,
+        chunkIndex: c.chunkIndex,
+        snippet: c.snippet,
+      }))
+      .sort((a, b) => a.n - b.n),
+    createdAt: row.createdAt.toISOString(),
+  }
+}
+
+/** Session title seeded from the first user message (CONTEXT §4). */
+function deriveTitle(content: string): string {
+  const trimmed = content.trim().replace(/\s+/g, " ")
+  return trimmed.length > 60 ? `${trimmed.slice(0, 57)}…` : trimmed || "New chat"
+}
+
+/** Request body for the grounded-chat turn (ADR-0003 selection, ADR-0010 model). */
+const chatTurnSchema = z.object({
+  // Omitted on the first turn of a new session; the server creates one.
+  sessionId: z.string().optional(),
+  content: z.string().trim().min(1, "Message is required").max(4000),
+  // Send is blocked with 0 selected documents (ADR-0003) — enforced here too.
+  selectedDocumentIds: z.array(z.string()).min(1, "Select at least one document"),
+  // Validated against the server allowlist (ADR-0010); rejects anything else.
+  model: z.string().refine(isAllowedModel, "Unknown model"),
+})
+
 /**
  * Guard for user-scoped routes (ADR-0001/ADR-0002): resolves the httpOnly-cookie
  * session and puts the authenticated `userId` on the context. Every domain query
@@ -154,7 +271,7 @@ function requireAuth(auth: Auth) {
  * real Postgres or a live better-auth instance.
  */
 export function createApi(deps: ApiDeps) {
-  const { db, auth, store, enqueueIngest } = deps
+  const { db, auth, store, enqueueIngest, embedder, answerModel } = deps
 
   const app = new Hono<{ Variables: Variables }>()
 
@@ -326,6 +443,172 @@ export function createApi(deps: ApiDeps) {
       await deleteDocument(db, userId, id)
       return c.body(null, 204)
     })
+    // The answer-model allowlist the picker offers (ADR-0010). The UI can only
+    // show what the server allows; the chat route re-validates on every request.
+    .get("/chat/models", requireAuth(auth), (c) =>
+      c.json({ models: ANSWER_MODELS, default: DEFAULT_ANSWER_MODEL }),
+    )
+    // A project's chat sessions — the history sidebar (CONTEXT §3).
+    .get(
+      "/projects/:projectId/chat/sessions",
+      requireAuth(auth),
+      async (c) => {
+        const userId = c.get("userId")
+        const projectId = c.req.param("projectId")
+        if (!(await getProject(db, userId, projectId))) {
+          return c.json({ error: "not_found" as const }, 404)
+        }
+        const rows = await listSessions(db, userId, projectId)
+        return c.json({ sessions: rows.map(toSessionDto) })
+      },
+    )
+    // A session's messages with their citations, in order (CONTEXT §4.7).
+    .get(
+      "/projects/:projectId/chat/sessions/:sessionId/messages",
+      requireAuth(auth),
+      async (c) => {
+        const userId = c.get("userId")
+        const sessionId = c.req.param("sessionId")
+        if (!(await getSession(db, userId, sessionId))) {
+          return c.json({ error: "not_found" as const }, 404)
+        }
+        const rows = await listMessages(db, userId, sessionId)
+        return c.json({ messages: rows.map(toMessageDto) })
+      },
+    )
+    // The core product moment (CONTEXT §4): persist the user turn, retrieve over
+    // the selected+indexed chunks, stream a grounded answer, and finalize with
+    // validated citations. Streams SSE (the client reads it with raw `fetch`, not
+    // `hc`); zod rejects a 0-doc turn or an off-allowlist model before any DB work.
+    .post(
+      "/projects/:projectId/chat",
+      requireAuth(auth),
+      zValidator("json", chatTurnSchema),
+      async (c) => {
+        const userId = c.get("userId")
+        const projectId = c.req.param("projectId")
+        if (!(await getProject(db, userId, projectId))) {
+          return c.json({ error: "not_found" as const }, 404)
+        }
+        const { sessionId, content, selectedDocumentIds, model } =
+          c.req.valid("json")
+
+        // Keep only selected docs the user actually owns in this project (tenancy).
+        const owned = new Set(
+          (await listDocuments(db, userId, projectId)).map((d) => d.id),
+        )
+        const selected = selectedDocumentIds.filter((id) => owned.has(id))
+        if (selected.length === 0) {
+          return c.json({ error: "invalid_documents" as const }, 400)
+        }
+
+        // Resolve the session (must be the user's), or open a new one for turn 1.
+        let session = sessionId
+          ? await getSession(db, userId, sessionId)
+          : undefined
+        if (sessionId && !session) {
+          return c.json({ error: "not_found" as const }, 404)
+        }
+        if (!session) {
+          session = await createSession(db, {
+            projectId,
+            userId,
+            title: deriveTitle(content),
+          })
+        }
+
+        // Persist the user turn BEFORE retrieval so it survives a failed
+        // generation and can be retried without re-retrieving (CONTEXT §4.2).
+        const userMessage = await createUserMessage(db, {
+          sessionId: session.id,
+          userId,
+          content,
+          selectedDocumentIds: selected,
+        })
+        await touchSession(db, session.id)
+
+        // Retrieve: embed the query, cosine search selected+indexed chunks, then
+        // apply the per-doc cap / floor / top-k ranking (ADR-0004).
+        const [queryEmbedding] = await embedder.embed([content])
+        const candidates = await retrieveCandidates(db, {
+          userId,
+          documentIds: selected,
+          queryEmbedding: queryEmbedding ?? [],
+          limit: OVER_FETCH,
+        })
+        const chunks = rankCandidates(candidates)
+
+        const result = streamText({
+          model: answerModel(model),
+          system: SYSTEM_PROMPT,
+          prompt: buildPrompt(content, chunks),
+          abortSignal: c.req.raw.signal,
+        })
+
+        const sessionId2 = session.id
+        return streamSSE(c, async (stream) => {
+          // Let the client route to the (possibly new) session immediately.
+          await stream.writeSSE({
+            event: "start",
+            data: JSON.stringify({
+              sessionId: sessionId2,
+              userMessageId: userMessage.id,
+            }),
+          })
+
+          let text = ""
+          let stopped = false
+          try {
+            for await (const delta of result.textStream) {
+              text += delta
+              await stream.writeSSE({
+                event: "delta",
+                data: JSON.stringify({ text: delta }),
+              })
+            }
+          } catch {
+            // Client aborted (or the model stream broke) — keep the partial answer.
+            stopped = true
+          }
+
+          // Validate the [n] markers and snapshot the cited chunks (ADR-0005).
+          const citations = validateCitations(text, chunks)
+          const usage = await result.usage.catch(() => undefined)
+
+          const assistant = await createAssistantMessage(db, {
+            sessionId: sessionId2,
+            userId,
+            content: text,
+            status: stopped ? "stopped" : "complete",
+            modelId: model,
+            tokenUsage: {
+              inputTokens: usage?.inputTokens ?? 0,
+              outputTokens: usage?.outputTokens ?? 0,
+              totalTokens: usage?.totalTokens ?? 0,
+            },
+            citations,
+          })
+
+          // Finalized and persisted — hand the client the message + sources so it
+          // can render without a refetch race.
+          await stream.writeSSE({
+            event: "done",
+            data: JSON.stringify({
+              messageId: assistant.id,
+              status: assistant.status,
+              citations: citations.map((c2) => ({
+                n: c2.n,
+                documentId: c2.documentId,
+                documentName: c2.documentName,
+                page: c2.page,
+                chunkIndex: c2.chunkIndex,
+                snippet: c2.snippet,
+              })),
+            }),
+          })
+        })
+      },
+    )
 }
 
 /** The typed shape the web client consumes via `hc<AppType>`. */

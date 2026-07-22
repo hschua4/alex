@@ -1,45 +1,61 @@
-import { useMemo, useState } from "react"
-import { ArrowUp, FileText, Loader2, Paperclip, Plus, X } from "lucide-react"
-import { Link, Navigate, useParams } from "react-router-dom"
+import { useEffect, useRef, useState } from "react"
+import {
+  ArrowUp,
+  Check,
+  ChevronDown,
+  FileText,
+  Loader2,
+  Plus,
+} from "lucide-react"
+import { Link, Navigate, useNavigate, useParams } from "react-router-dom"
 
 import { DocBadge } from "@/components/doc-badge"
 import { ProjectSidebarHeader } from "@/components/project-sidebar-header"
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Textarea } from "@/components/ui/textarea"
 import {
-  defaultSelectedDocIds,
-  getChats,
-  getDocuments,
-  getMessages,
-  type Chat,
+  useChatStream,
+  useMessages,
+  useModels,
+  useSessions,
+  type ChatMessage,
+  type ChatSession,
   type Citation,
-  type Doc,
-  type Message,
-} from "@/lib/mock-data"
+} from "@/lib/chat"
+import { useDocuments, type Document } from "@/lib/documents"
 import { useProject, type Project } from "@/lib/projects"
 import { cn } from "@/lib/utils"
+
+const MODEL_STORAGE_KEY = "alex.answerModel"
 
 export function ChatScreen() {
   const { projectId = "", chatId } = useParams()
   const { data: project, isPending } = useProject(projectId)
-  const chats = getChats(projectId)
-  const activeChatId = chatId ?? chats[0]?.id ?? ""
 
-  const documents = getDocuments(projectId)
-  const [selected, setSelected] = useState<Set<string>>(
-    () => new Set(defaultSelectedDocIds)
-  )
+  const { data: sessions = [] } = useSessions(projectId)
+  const { data: documents = [] } = useDocuments(projectId)
+  const { data: messages = [] } = useMessages(chatId)
+  const { pending, send, isStreaming } = useChatStream(projectId)
+
   const [tab, setTab] = useState<"documents" | "sources">("documents")
 
-  const messages = getMessages(activeChatId)
-  const activeChat = chats.find((c) => c.id === activeChatId)
-  const sources = useMemo(
-    () =>
-      messages.flatMap((m) => (m.role === "assistant" ? m.citations : [])),
-    [messages]
-  )
+  // Default the selection to every indexed document, once, when they first load.
+  const [selected, setSelected] = useState<Set<string> | null>(null)
+  const initialized = useRef(false)
+  useEffect(() => {
+    if (initialized.current || documents.length === 0) return
+    initialized.current = true
+    setSelected(new Set(documents.filter((d) => d.status === "indexed").map((d) => d.id)))
+  }, [documents])
+  const selectedIds = selected ?? new Set<string>()
 
   if (isPending) {
     return (
@@ -52,37 +68,49 @@ export function ChatScreen() {
 
   function toggleDoc(id: string) {
     setSelected((prev) => {
-      const next = new Set(prev)
-      next.has(id) ? next.delete(id) : next.add(id)
+      const next = new Set(prev ?? [])
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
       return next
     })
   }
 
-  const selectedDocs = documents.filter((d) => selected.has(d.id))
+  const activeSession = sessions.find((s) => s.id === chatId)
+
+  // The transcript: persisted messages, plus the in-flight turn while streaming.
+  const pendingTurn = pending
+  const selectedCount = selectedIds.size
+
+  // Sources panel shows the passages cited by the latest answer.
+  const latestSources = latestCitations(messages)
 
   return (
     <div className="flex flex-1 overflow-hidden">
       <ChatHistorySidebar
         project={project}
         projectId={projectId}
-        chats={chats}
-        activeChatId={activeChatId}
+        sessions={sessions}
+        activeChatId={chatId}
       />
 
       {/* center column */}
       <div className="flex flex-1 flex-col overflow-hidden bg-secondary">
         <header className="flex h-16 shrink-0 items-center gap-3 border-b bg-card px-7">
-          <h1 className="text-base font-bold tracking-tight">
-            {activeChat?.title ?? "New chat"}
+          <h1 className="truncate text-base font-bold tracking-tight">
+            {activeSession?.title ?? "New chat"}
           </h1>
-          <span className="flex h-7 items-center gap-1.5 rounded-full bg-accent px-2.5 text-[12.5px] font-semibold text-accent-foreground">
+          <span className="flex h-7 shrink-0 items-center gap-1.5 rounded-full bg-accent px-2.5 text-[12.5px] font-semibold text-accent-foreground">
             <FileText className="size-[13px]" strokeWidth={2.2} />
-            {selectedDocs.length} documents in context
+            {selectedCount} {selectedCount === 1 ? "document" : "documents"} in
+            context
           </span>
         </header>
 
         <div className="flex-1 overflow-y-auto py-8">
           <div className="mx-auto flex max-w-[720px] flex-col gap-[30px] px-4">
+            {messages.length === 0 && !pendingTurn && (
+              <EmptyState hasDocuments={documents.some((d) => d.status === "indexed")} />
+            )}
             {messages.map((message) => (
               <MessageBubble
                 key={message.id}
@@ -90,12 +118,30 @@ export function ChatScreen() {
                 onOpenSources={() => setTab("sources")}
               />
             ))}
+            {pendingTurn && (
+              <>
+                <UserBubble text={pendingTurn.userContent} />
+                <AssistantStreaming
+                  text={pendingTurn.assistantText}
+                  error={pendingTurn.error}
+                />
+              </>
+            )}
           </div>
         </div>
 
         <Composer
-          selectedDocs={selectedDocs}
-          onRemoveDoc={toggleDoc}
+          documents={documents}
+          selectedIds={selectedIds}
+          disabled={isStreaming}
+          onSend={(content, model) =>
+            send({
+              content,
+              model,
+              selectedDocumentIds: [...selectedIds],
+              sessionId: chatId,
+            })
+          }
         />
       </div>
 
@@ -103,12 +149,21 @@ export function ChatScreen() {
         tab={tab}
         onTabChange={setTab}
         documents={documents}
-        selected={selected}
+        selected={selectedIds}
         onToggleDoc={toggleDoc}
-        sources={sources}
+        sources={latestSources}
       />
     </div>
   )
+}
+
+/** Citations of the most recent assistant message (the "latest answer"). */
+function latestCitations(messages: ChatMessage[]): Citation[] {
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const m = messages[i]
+    if (m.role === "assistant") return m.citations
+  }
+  return []
 }
 
 // ── left: chat history ──────────────────────────────────────────────────────
@@ -116,14 +171,15 @@ export function ChatScreen() {
 function ChatHistorySidebar({
   project,
   projectId,
-  chats,
+  sessions,
   activeChatId,
 }: {
   project: Project
   projectId: string
-  chats: Chat[]
-  activeChatId: string
+  sessions: ChatSession[]
+  activeChatId: string | undefined
 }) {
+  const navigate = useNavigate()
   return (
     <aside className="flex w-[264px] shrink-0 flex-col border-r bg-card">
       <ProjectSidebarHeader project={project} />
@@ -131,6 +187,7 @@ function ChatHistorySidebar({
       <div className="p-3.5 pb-2.5">
         <Button
           variant="outline"
+          onClick={() => navigate(`/p/${projectId}/chat`)}
           className="h-10 w-full rounded-[10px] font-semibold hover:border-primary hover:text-primary"
         >
           <Plus data-icon="inline-start" strokeWidth={2.3} />
@@ -142,7 +199,12 @@ function ChatHistorySidebar({
         Recent
       </p>
       <div className="flex flex-1 flex-col gap-0.5 overflow-y-auto px-3 pb-4">
-        {chats.map((chat) => {
+        {sessions.length === 0 && (
+          <p className="px-3 py-2 text-xs text-muted-foreground">
+            No chats yet. Ask a question to start one.
+          </p>
+        )}
+        {sessions.map((chat) => {
           const active = chat.id === activeChatId
           return (
             <Link
@@ -163,12 +225,8 @@ function ChatHistorySidebar({
               >
                 {chat.title}
               </p>
-              <p className="mt-0.5 truncate text-xs text-muted-foreground">
-                {chat.preview}
-              </p>
               <div className="mt-1.5 flex items-center gap-2 text-[11px] text-muted-foreground">
-                <span className="font-mono">{chat.timeLabel}</span>
-                <span>· {chat.docCount} docs</span>
+                <span className="font-mono">{chat.updatedLabel}</span>
               </div>
             </Link>
           )
@@ -180,37 +238,74 @@ function ChatHistorySidebar({
 
 // ── center: messages ────────────────────────────────────────────────────────
 
+function UserBubble({ text }: { text: string }) {
+  return (
+    <div className="flex justify-end">
+      <div className="max-w-[78%] whitespace-pre-wrap rounded-[16px] rounded-br-[4px] bg-primary px-[17px] py-3 text-[14.5px] leading-relaxed text-primary-foreground">
+        {text}
+      </div>
+    </div>
+  )
+}
+
+function AssistantAvatar() {
+  return (
+    <div className="flex size-8 shrink-0 items-center justify-center rounded-[9px] bg-rail text-[13px] font-extrabold text-white">
+      A
+    </div>
+  )
+}
+
+function AssistantStreaming({
+  text,
+  error,
+}: {
+  text: string
+  error?: string
+}) {
+  return (
+    <div className="flex gap-3.5">
+      <AssistantAvatar />
+      <div className="min-w-0 flex-1">
+        {error ? (
+          <p className="text-[14.5px] leading-[1.65] text-destructive">{error}</p>
+        ) : text ? (
+          <p className="whitespace-pre-wrap text-[14.5px] leading-[1.65] text-foreground/90">
+            <InlineCitations text={text} />
+            <span className="ml-0.5 inline-block h-4 w-[2px] translate-y-0.5 animate-pulse bg-primary align-middle" />
+          </p>
+        ) : (
+          <div className="flex items-center gap-2 text-muted-foreground">
+            <Loader2 className="size-4 animate-spin" />
+            <span className="text-[13.5px]">Searching your documents…</span>
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
+
 function MessageBubble({
   message,
   onOpenSources,
 }: {
-  message: Message
+  message: ChatMessage
   onOpenSources: () => void
 }) {
-  if (message.role === "user") {
-    return (
-      <div className="flex justify-end">
-        <div className="max-w-[78%] rounded-[16px] rounded-br-[4px] bg-primary px-[17px] py-3 text-[14.5px] leading-relaxed text-primary-foreground">
-          {message.text}
-        </div>
-      </div>
-    )
-  }
+  if (message.role === "user") return <UserBubble text={message.content} />
 
   return (
     <div className="flex gap-3.5">
-      <div className="flex size-8 shrink-0 items-center justify-center rounded-[9px] bg-rail text-[13px] font-extrabold text-white">
-        R
-      </div>
+      <AssistantAvatar />
       <div className="min-w-0 flex-1">
-        {message.paragraphs.map((para, i) => (
-          <p
-            key={i}
-            className="mb-3 text-[14.5px] leading-[1.65] text-foreground/90"
-          >
-            <InlineCitations text={para} onClick={onOpenSources} />
+        <p className="whitespace-pre-wrap text-[14.5px] leading-[1.65] text-foreground/90">
+          <InlineCitations text={message.content} onClick={onOpenSources} />
+        </p>
+        {message.status === "stopped" && (
+          <p className="mt-2 text-xs italic text-muted-foreground">
+            Generation stopped.
           </p>
-        ))}
+        )}
         {message.citations.length > 0 && (
           <div className="mt-3.5 flex flex-wrap items-center gap-2">
             <span className="text-xs font-semibold text-muted-foreground">
@@ -225,7 +320,7 @@ function MessageBubble({
               >
                 <CitationNumber n={cite.n} />
                 <span className="truncate font-medium text-foreground/75">
-                  {shortDocName(cite.docName)}
+                  {shortDocName(cite.documentName)}
                 </span>
               </button>
             ))}
@@ -242,7 +337,7 @@ function InlineCitations({
   onClick,
 }: {
   text: string
-  onClick: () => void
+  onClick?: () => void
 }) {
   const parts = text.split(/(\[\d+\])/g)
   return (
@@ -255,7 +350,7 @@ function InlineCitations({
             key={i}
             type="button"
             onClick={onClick}
-            className="mx-0.5 -translate-y-1 text-[10px] align-super font-bold text-primary hover:underline"
+            className="mx-0.5 -translate-y-1 align-super text-[10px] font-bold text-primary hover:underline"
           >
             [{match[1]}]
           </button>
@@ -273,58 +368,138 @@ function CitationNumber({ n }: { n: number }) {
   )
 }
 
+function EmptyState({ hasDocuments }: { hasDocuments: boolean }) {
+  return (
+    <div className="mt-16 flex flex-col items-center text-center text-muted-foreground">
+      <div className="flex size-12 items-center justify-center rounded-2xl bg-accent text-accent-foreground">
+        <FileText className="size-6" strokeWidth={2} />
+      </div>
+      <p className="mt-4 text-[15px] font-semibold text-foreground">
+        Ask a question about your documents
+      </p>
+      <p className="mt-1 max-w-[380px] text-[13.5px]">
+        {hasDocuments
+          ? "Select the documents to search, then ask below. Answers come with numbered citations back to the source."
+          : "Upload and index a document first, then ask a question here."}
+      </p>
+    </div>
+  )
+}
+
 // ── center: composer ────────────────────────────────────────────────────────
 
 function Composer({
-  selectedDocs,
-  onRemoveDoc,
+  documents,
+  selectedIds,
+  disabled,
+  onSend,
 }: {
-  selectedDocs: Doc[]
-  onRemoveDoc: (id: string) => void
+  documents: Document[]
+  selectedIds: Set<string>
+  disabled: boolean
+  onSend: (content: string, model: string) => void
 }) {
+  const { data: modelData } = useModels()
+  // The remembered pick; the effective model is derived (no effect) so it always
+  // falls back to the server default when nothing is stored or the stored id is
+  // no longer on the allowlist.
+  const [picked, setPicked] = useState<string | null>(() =>
+    localStorage.getItem(MODEL_STORAGE_KEY)
+  )
+  const modelIds = modelData?.models.map((m) => m.id) ?? []
+  const model =
+    picked && modelIds.includes(picked) ? picked : modelData?.default ?? ""
+
+  const [input, setInput] = useState("")
+  const selectedDocs = documents.filter((d) => selectedIds.has(d.id))
+  const canSend = input.trim().length > 0 && selectedIds.size > 0 && !disabled
+
+  function submit() {
+    if (!canSend || !model) return
+    onSend(input.trim(), model)
+    setInput("")
+  }
+
+  function pickModel(id: string) {
+    setPicked(id)
+    localStorage.setItem(MODEL_STORAGE_KEY, id)
+  }
+
+  const activeLabel =
+    modelData?.models.find((m) => m.id === model)?.label ?? "Model"
+
   return (
     <div className="shrink-0 pb-6">
       <div className="mx-auto max-w-[720px] px-4">
         <div className="mb-2.5 flex flex-wrap items-center gap-1.5 px-1">
           <span className="text-xs font-medium text-muted-foreground">
-            Chatting with
+            {selectedDocs.length > 0 ? "Chatting with" : "Select documents to chat with"}
           </span>
           {selectedDocs.map((doc) => (
             <span
               key={doc.id}
-              className="inline-flex h-[26px] items-center gap-1.5 rounded-[7px] border bg-card pl-2 pr-1.5 text-xs font-medium text-foreground/80"
+              className="inline-flex h-[26px] items-center gap-1.5 rounded-[7px] border bg-card px-2 text-xs font-medium text-foreground/80"
             >
               <DocBadge type={doc.type} size="sm" />
-              {doc.short}
-              <button
-                type="button"
-                aria-label={`Remove ${doc.short}`}
-                onClick={() => onRemoveDoc(doc.id)}
-                className="flex p-0.5 text-muted-foreground/70 transition-colors hover:text-foreground"
-              >
-                <X className="size-3" strokeWidth={2.5} />
-              </button>
+              {shortDocName(doc.filename)}
             </span>
           ))}
         </div>
 
         <div className="rounded-2xl border bg-card p-4 shadow-[0_4px_16px_-8px_oklch(0.4_0.03_264_/_0.2)] focus-within:border-ring">
           <Textarea
+            value={input}
+            onChange={(e) => setInput(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && !e.shiftKey) {
+                e.preventDefault()
+                submit()
+              }
+            }}
             placeholder="Ask a question about your selected documents…"
             rows={1}
             className="min-h-6 resize-none border-0 bg-transparent p-0 text-[14.5px] shadow-none focus-visible:ring-0 dark:bg-transparent"
           />
           <div className="mt-3 flex items-center justify-between">
+            <DropdownMenu>
+              <DropdownMenuTrigger
+                render={
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="h-[30px] rounded-lg text-[12.5px] text-muted-foreground"
+                  >
+                    {activeLabel}
+                    <ChevronDown data-icon="inline-end" className="opacity-70" />
+                  </Button>
+                }
+              />
+              <DropdownMenuContent align="start" className="min-w-[200px]">
+                {modelData?.models.map((m) => (
+                  <DropdownMenuItem
+                    key={m.id}
+                    onClick={() => pickModel(m.id)}
+                    className="justify-between"
+                  >
+                    {m.label}
+                    {m.id === model && <Check className="size-3.5" />}
+                  </DropdownMenuItem>
+                ))}
+              </DropdownMenuContent>
+            </DropdownMenu>
+
             <Button
-              variant="outline"
-              size="sm"
-              className="h-[30px] rounded-lg text-[12.5px] text-muted-foreground"
+              size="icon"
+              className="size-9 rounded-[10px]"
+              disabled={!canSend}
+              onClick={submit}
+              aria-label="Send message"
             >
-              <Paperclip data-icon="inline-start" />
-              Attach
-            </Button>
-            <Button size="icon" className="size-9 rounded-[10px]">
-              <ArrowUp strokeWidth={2.3} />
+              {disabled ? (
+                <Loader2 className="animate-spin" />
+              ) : (
+                <ArrowUp strokeWidth={2.3} />
+              )}
             </Button>
           </div>
         </div>
@@ -345,7 +520,7 @@ function SidePanel({
 }: {
   tab: "documents" | "sources"
   onTabChange: (t: "documents" | "sources") => void
-  documents: Doc[]
+  documents: Document[]
   selected: Set<string>
   onToggleDoc: (id: string) => void
   sources: Citation[]
@@ -371,30 +546,46 @@ function SidePanel({
           className="flex flex-1 flex-col overflow-hidden"
         >
           <p className="px-4 pb-2 pt-3.5 text-xs text-muted-foreground">
-            Select which documents to include in this chat's context.
+            Select which documents to include in this chat's context. Only
+            indexed documents can be searched.
           </p>
           <div className="flex-1 overflow-y-auto px-2.5 pb-4">
+            {documents.length === 0 && (
+              <p className="px-2 py-2 text-[13px] text-muted-foreground">
+                No documents in this project yet.
+              </p>
+            )}
             {documents.map((doc) => {
+              const indexed = doc.status === "indexed"
               const isSelected = selected.has(doc.id)
               return (
                 <button
                   key={doc.id}
                   type="button"
+                  disabled={!indexed}
                   onClick={() => onToggleDoc(doc.id)}
-                  className="flex w-full items-center gap-3 rounded-[10px] p-2.5 text-left transition-colors hover:bg-secondary"
+                  className={cn(
+                    "flex w-full items-center gap-3 rounded-[10px] p-2.5 text-left transition-colors",
+                    indexed ? "hover:bg-secondary" : "cursor-not-allowed opacity-60"
+                  )}
                 >
                   <Checkbox
                     checked={isSelected}
+                    disabled={!indexed}
                     className="pointer-events-none size-[19px]"
                     tabIndex={-1}
                   />
                   <DocBadge type={doc.type} />
                   <div className="min-w-0 flex-1">
                     <p className="truncate text-[13px] font-semibold">
-                      {doc.name}
+                      {doc.filename}
                     </p>
                     <p className="text-[11.5px] text-muted-foreground">
-                      {doc.pages} pages · {doc.sizeLabel}
+                      {indexed
+                        ? `${doc.pageCount} pages · ${doc.sizeLabel}`
+                        : doc.status === "processing"
+                          ? "Processing…"
+                          : "Failed to index"}
                     </p>
                   </div>
                 </button>
@@ -411,21 +602,23 @@ function SidePanel({
             Passages retrieved for the latest answer.
           </p>
           <div className="flex flex-1 flex-col gap-3 overflow-y-auto px-4 pb-4">
+            {sources.length === 0 && (
+              <p className="px-1 py-2 text-[13px] text-muted-foreground">
+                Sources for the latest answer will appear here.
+              </p>
+            )}
             {sources.map((source) => (
-              <div
-                key={source.n}
-                className="overflow-hidden rounded-xl border"
-              >
+              <div key={source.n} className="overflow-hidden rounded-xl border">
                 <div className="flex items-center gap-2.5 border-b bg-secondary px-3 py-2.5">
                   <span className="flex size-5 shrink-0 items-center justify-center rounded-md bg-primary text-[11px] font-bold text-primary-foreground">
                     {source.n}
                   </span>
                   <div className="min-w-0 flex-1">
                     <p className="truncate text-[12.5px] font-semibold">
-                      {source.docName}
+                      {source.documentName}
                     </p>
                     <p className="font-mono text-[11px] text-muted-foreground">
-                      {source.locationLabel}
+                      p. {source.page} · chunk {source.chunkIndex}
                     </p>
                   </div>
                 </div>

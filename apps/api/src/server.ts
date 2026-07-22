@@ -6,6 +6,7 @@ import { createDb, databaseUrl, markFailed } from "@alex/db"
 
 import { createApi } from "./app.ts"
 import { createAuth } from "./auth.ts"
+import { createOpenRouterAnswerModel } from "./chat/index.ts"
 import {
   createIngestQueue,
   createOpenAIEmbedder,
@@ -47,6 +48,13 @@ const embedder = createOpenAIEmbedder({
   model: process.env.EMBEDDING_MODEL,
 })
 
+// The answer model is user-selectable from a server allowlist (ADR-0010), routed
+// through OpenRouter on the same key. The route validates the id before calling.
+const answerModel = createOpenRouterAnswerModel({
+  apiKey: required("OPENROUTER_API_KEY"),
+  baseURL: process.env.OPENROUTER_BASE_URL ?? "https://openrouter.ai/api/v1",
+})
+
 // Ingestion queue on the same Postgres (ADR-0006), worker in-process with a hard
 // concurrency cap (INGEST_CONCURRENCY) so it can't starve chat latency.
 const queue = createIngestQueue(databaseUrl())
@@ -60,7 +68,17 @@ await queue.process({
 const app = new Hono()
 
 // The API lives under /api so httpOnly cookies and the SPA share one origin.
-app.route("/api", createApi({ db, auth, store, enqueueIngest: queue.enqueue }))
+app.route(
+  "/api",
+  createApi({
+    db,
+    auth,
+    store,
+    enqueueIngest: queue.enqueue,
+    embedder,
+    answerModel,
+  }),
+)
 
 // Static SPA assets, then a catch-all fallback to index.html for client routes.
 app.use("/*", serveStatic({ root: webDist }))

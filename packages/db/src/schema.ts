@@ -3,6 +3,7 @@ import {
   boolean,
   index,
   integer,
+  jsonb,
   pgEnum,
   pgTable,
   text,
@@ -146,6 +147,121 @@ export const chunk = pgTable(
 
 export type Chunk = typeof chunk.$inferSelect
 export type NewChunk = typeof chunk.$inferInsert
+
+/**
+ * A chat session is a conversation within a project (CONTEXT §3). Like every
+ * product table it carries `userId` and is scoped by it directly; it cascades
+ * with its project. The `title` is seeded from the first user message.
+ */
+export const chatSession = pgTable(
+  "chat_session",
+  {
+    id: text("id").primaryKey(),
+    projectId: text("project_id")
+      .notNull()
+      .references(() => project.id, { onDelete: "cascade" }),
+    userId: text("user_id").notNull(),
+    title: text("title").notNull().default("New chat"),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .default(sql`now()`),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .default(sql`now()`),
+  },
+  // The history sidebar lists a project's sessions by owner, newest first.
+  (t) => [index("chat_session_user_project_idx").on(t.userId, t.projectId)],
+)
+
+export type ChatSession = typeof chatSession.$inferSelect
+
+export const messageRole = pgEnum("message_role", ["user", "assistant"])
+
+/**
+ * A message's terminal state (CONTEXT §4.6). User turns and finished answers are
+ * `complete`; a cancelled stream is kept as `stopped`; a generation that errored
+ * after the user turn was persisted is `failed`. Provenance survives either way.
+ */
+export const messageStatus = pgEnum("message_status", [
+  "complete",
+  "stopped",
+  "failed",
+])
+
+/** Token accounting stored on an assistant message (CONTEXT §3, provenance). */
+export type TokenUsage = {
+  inputTokens: number
+  outputTokens: number
+  totalTokens: number
+}
+
+/**
+ * One turn in a session (CONTEXT §3). The user turn is persisted *before*
+ * retrieval so provenance survives a failed generation (CONTEXT §4.2); it records
+ * the `selectedDocumentIds` retrieval was scoped to *that turn*. The assistant
+ * turn records the `modelId` that produced it and its `tokenUsage` — provenance
+ * is stored, not derived. Messages cascade with their session.
+ */
+export const message = pgTable(
+  "message",
+  {
+    id: text("id").primaryKey(),
+    sessionId: text("session_id")
+      .notNull()
+      .references(() => chatSession.id, { onDelete: "cascade" }),
+    userId: text("user_id").notNull(),
+    role: messageRole("role").notNull(),
+    content: text("content").notNull(),
+    status: messageStatus("status").notNull().default("complete"),
+    // The per-turn document scope (ADR-0003). Set on user turns; empty otherwise.
+    selectedDocumentIds: text("selected_document_ids")
+      .array()
+      .notNull()
+      .default(sql`ARRAY[]::text[]`),
+    // The answer model + accounting (ADR-0010). Null on user turns.
+    modelId: text("model_id"),
+    tokenUsage: jsonb("token_usage").$type<TokenUsage>(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .default(sql`now()`),
+  },
+  // Rendering a session reads its messages in creation order.
+  (t) => [index("message_session_idx").on(t.sessionId, t.createdAt)],
+)
+
+export type Message = typeof message.$inferSelect
+export type NewMessage = typeof message.$inferInsert
+
+/**
+ * A numbered `[n]` citation on an assistant message (CONTEXT §3, ADR-0005).
+ * Numbering is per-answer and ephemeral. The snippet, document name, and location
+ * are *snapshotted at answer time* so history renders faithfully even if the
+ * source document is later re-indexed or deleted — `chunkId` is a soft reference
+ * (nullable, no FK), kept only for a future jump-to-source.
+ */
+export const messageCitation = pgTable(
+  "message_citation",
+  {
+    id: text("id").primaryKey(),
+    messageId: text("message_id")
+      .notNull()
+      .references(() => message.id, { onDelete: "cascade" }),
+    n: integer("n").notNull(),
+    chunkId: text("chunk_id"),
+    documentId: text("document_id").notNull(),
+    documentName: text("document_name").notNull(),
+    page: integer("page").notNull(),
+    chunkIndex: integer("chunk_index").notNull(),
+    snippet: text("snippet").notNull(),
+  },
+  (t) => [
+    unique("message_citation_message_id_n_uq").on(t.messageId, t.n),
+    index("message_citation_message_idx").on(t.messageId),
+  ],
+)
+
+export type MessageCitation = typeof messageCitation.$inferSelect
+export type NewMessageCitation = typeof messageCitation.$inferInsert
 
 /**
  * Auth tables owned by better-auth (ADR-0002). Column keys are camelCase to
