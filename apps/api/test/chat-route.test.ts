@@ -4,7 +4,10 @@ import type { Database } from "@alex/db"
 
 import { createApi, type SessionUser } from "../src/app.ts"
 import type { Auth } from "../src/auth.ts"
-import { DEFAULT_ANSWER_MODEL } from "../src/chat/index.ts"
+import {
+  createPassthroughCondenser,
+  DEFAULT_ANSWER_MODEL,
+} from "../src/chat/index.ts"
 import { createFakeEmbedder, createMemoryStore } from "../src/ingest/index.ts"
 import { mockStreamModel } from "./mocks/models.ts"
 
@@ -38,6 +41,7 @@ function apiWith(session: { user: SessionUser } | null) {
     enqueueIngest: async () => {},
     embedder: createFakeEmbedder(),
     answerModel: () => mockStreamModel(),
+    condense: createPassthroughCondenser(),
   })
 }
 

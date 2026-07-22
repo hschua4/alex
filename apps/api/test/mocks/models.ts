@@ -50,6 +50,35 @@ export function mockStreamModel(text = "Mock grounded answer [1].") {
 }
 
 /**
+ * A streaming stub that emits a few deltas of `partial` and then *errors* the
+ * stream — standing in for a client abort or a broken model stream. The chat
+ * route catches this and keeps the partial answer as `stopped` (CONTEXT §4.6), so
+ * this deterministically exercises the stopped path without racing a real abort.
+ */
+export function mockBrokenStreamModel(partial = "Partial answer") {
+  const parts = partial.match(/.{1,12}/gs) ?? [partial]
+  const chunks = [
+    { type: "text-start", id: "0" },
+    ...parts.map((delta) => ({ type: "text-delta", id: "0", delta })),
+    { type: "text-end", id: "0" },
+  ]
+  return new MockLanguageModelV2({
+    doStream: async () => ({
+      // Deliver the deltas one per pull, then *reject* the read — the same shape
+      // a client abort or a dropped model connection takes. The route's
+      // `for await` throws, so the partial is finalized as `stopped`.
+      stream: new ReadableStream({
+        pull(controller) {
+          const next = chunks.shift()
+          if (next) controller.enqueue(next)
+          else controller.error(new Error("stream broke mid-answer"))
+        },
+      }),
+    }),
+  })
+}
+
+/**
  * Deterministic 1536-d fake embedding. Same text always maps to the same
  * vector, distinct texts to distinguishable ones — enough to exercise cosine
  * ordering without a real embedding model.

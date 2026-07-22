@@ -123,7 +123,9 @@ export type CitationInput = {
  * Finalize an assistant turn (CONTEXT §4.6): insert the message with its text,
  * `modelId`, and `tokenUsage`, then its validated citations — atomically, so a
  * message never lands without the citations the sources panel reads. `status` is
- * `stopped` for a cancelled stream, `complete` otherwise.
+ * `stopped` for a cancelled stream, `complete` otherwise. `regeneratedFrom`, when
+ * set, links this answer to the one it supersedes — regenerate is additive, so the
+ * original is never touched (CONTEXT §4.6).
  */
 export async function createAssistantMessage(
   db: Database,
@@ -135,6 +137,7 @@ export async function createAssistantMessage(
     modelId: string
     tokenUsage: TokenUsage
     citations: CitationInput[]
+    regeneratedFrom?: string | null
   },
 ): Promise<Message> {
   return db.transaction(async (tx) => {
@@ -149,6 +152,7 @@ export async function createAssistantMessage(
         status: input.status,
         modelId: input.modelId,
         tokenUsage: input.tokenUsage,
+        regeneratedFrom: input.regeneratedFrom ?? null,
       })
       .returning()
     if (!row) throw new Error("createAssistantMessage: insert returned no row")
@@ -208,6 +212,23 @@ export async function listMessages(
     byMessage.set(c.messageId, list)
   }
   return messages.map((m) => ({ ...m, citations: byMessage.get(m.id) ?? [] }))
+}
+
+/**
+ * A single message, but only if it belongs to `userId` — the scoping guard for
+ * regenerate, which resolves the assistant answer to re-run from its id alone.
+ */
+export async function getMessage(
+  db: Database,
+  userId: string,
+  messageId: string,
+): Promise<Message | undefined> {
+  const [row] = await db
+    .select()
+    .from(message)
+    .where(and(eq(message.id, messageId), eq(message.userId, userId)))
+    .limit(1)
+  return row
 }
 
 // ── retrieval ────────────────────────────────────────────────────────────────

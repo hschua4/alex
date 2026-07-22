@@ -6,6 +6,8 @@ import {
   FileText,
   Loader2,
   Plus,
+  RefreshCw,
+  Square,
 } from "lucide-react"
 import { Link, Navigate, useNavigate, useParams } from "react-router-dom"
 
@@ -22,9 +24,9 @@ import {
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Textarea } from "@/components/ui/textarea"
 import {
+  useAnswerModel,
   useChatStream,
   useMessages,
-  useModels,
   useSessions,
   type ChatMessage,
   type ChatSession,
@@ -34,8 +36,6 @@ import { useDocuments, type Document } from "@/lib/documents"
 import { useProject, type Project } from "@/lib/projects"
 import { cn } from "@/lib/utils"
 
-const MODEL_STORAGE_KEY = "alex.answerModel"
-
 export function ChatScreen() {
   const { projectId = "", chatId } = useParams()
   const { data: project, isPending } = useProject(projectId)
@@ -43,7 +43,9 @@ export function ChatScreen() {
   const { data: sessions = [] } = useSessions(projectId)
   const { data: documents = [] } = useDocuments(projectId)
   const { data: messages = [] } = useMessages(chatId)
-  const { pending, send, isStreaming } = useChatStream(projectId)
+  const { pending, send, regenerate, stop, isStreaming } =
+    useChatStream(projectId)
+  const answerModel = useAnswerModel()
 
   const [tab, setTab] = useState<"documents" | "sources">("documents")
 
@@ -81,8 +83,22 @@ export function ChatScreen() {
   const pendingTurn = pending
   const selectedCount = selectedIds.size
 
+  // Regenerate is additive (CONTEXT §4.6): a superseded answer stays in the DB but
+  // its replacement takes its place in view. Hide any answer another one points at,
+  // plus the one currently being regenerated as its fresh answer streams in.
+  const superseded = new Set(
+    messages.map((m) => m.regeneratedFrom).filter((id): id is string => !!id),
+  )
+  if (pendingTurn?.regeneratingFrom) superseded.add(pendingTurn.regeneratingFrom)
+  const visibleMessages = messages.filter((m) => !superseded.has(m.id))
+
+  // The newest assistant answer can be regenerated (only when idle).
+  const lastAssistantId = [...visibleMessages]
+    .reverse()
+    .find((m) => m.role === "assistant")?.id
+
   // Sources panel shows the passages cited by the latest answer.
-  const latestSources = latestCitations(messages)
+  const latestSources = latestCitations(visibleMessages)
 
   return (
     <div className="flex flex-1 overflow-hidden">
@@ -108,19 +124,32 @@ export function ChatScreen() {
 
         <div className="flex-1 overflow-y-auto py-8">
           <div className="mx-auto flex max-w-[720px] flex-col gap-[30px] px-4">
-            {messages.length === 0 && !pendingTurn && (
+            {visibleMessages.length === 0 && !pendingTurn && (
               <EmptyState hasDocuments={documents.some((d) => d.status === "indexed")} />
             )}
-            {messages.map((message) => (
+            {visibleMessages.map((message) => (
               <MessageBubble
                 key={message.id}
                 message={message}
                 onOpenSources={() => setTab("sources")}
+                canRegenerate={
+                  message.id === lastAssistantId && !isStreaming && !!chatId
+                }
+                onRegenerate={() =>
+                  chatId &&
+                  regenerate({
+                    messageId: message.id,
+                    model: answerModel.model,
+                    sessionId: chatId,
+                  })
+                }
               />
             ))}
             {pendingTurn && (
               <>
-                <UserBubble text={pendingTurn.userContent} />
+                {pendingTurn.userContent !== undefined && (
+                  <UserBubble text={pendingTurn.userContent} />
+                )}
                 <AssistantStreaming
                   text={pendingTurn.assistantText}
                   error={pendingTurn.error}
@@ -133,11 +162,13 @@ export function ChatScreen() {
         <Composer
           documents={documents}
           selectedIds={selectedIds}
-          disabled={isStreaming}
-          onSend={(content, model) =>
+          model={answerModel}
+          streaming={isStreaming}
+          onStop={stop}
+          onSend={(content) =>
             send({
               content,
-              model,
+              model: answerModel.model,
               selectedDocumentIds: [...selectedIds],
               sessionId: chatId,
             })
@@ -288,9 +319,13 @@ function AssistantStreaming({
 function MessageBubble({
   message,
   onOpenSources,
+  canRegenerate,
+  onRegenerate,
 }: {
   message: ChatMessage
   onOpenSources: () => void
+  canRegenerate: boolean
+  onRegenerate: () => void
 }) {
   if (message.role === "user") return <UserBubble text={message.content} />
 
@@ -305,6 +340,16 @@ function MessageBubble({
           <p className="mt-2 text-xs italic text-muted-foreground">
             Generation stopped.
           </p>
+        )}
+        {canRegenerate && (
+          <button
+            type="button"
+            onClick={onRegenerate}
+            className="mt-2.5 inline-flex items-center gap-1.5 rounded-lg border bg-card px-2.5 py-1 text-xs font-medium text-muted-foreground transition-colors hover:border-primary hover:text-primary"
+          >
+            <RefreshCw className="size-3" strokeWidth={2.2} />
+            Regenerate
+          </button>
         )}
         {message.citations.length > 0 && (
           <div className="mt-3.5 flex flex-wrap items-center gap-2">
@@ -391,42 +436,29 @@ function EmptyState({ hasDocuments }: { hasDocuments: boolean }) {
 function Composer({
   documents,
   selectedIds,
-  disabled,
+  model: answerModel,
+  streaming,
+  onStop,
   onSend,
 }: {
   documents: Document[]
   selectedIds: Set<string>
-  disabled: boolean
-  onSend: (content: string, model: string) => void
+  model: ReturnType<typeof useAnswerModel>
+  streaming: boolean
+  onStop: () => void
+  onSend: (content: string) => void
 }) {
-  const { data: modelData } = useModels()
-  // The remembered pick; the effective model is derived (no effect) so it always
-  // falls back to the server default when nothing is stored or the stored id is
-  // no longer on the allowlist.
-  const [picked, setPicked] = useState<string | null>(() =>
-    localStorage.getItem(MODEL_STORAGE_KEY)
-  )
-  const modelIds = modelData?.models.map((m) => m.id) ?? []
-  const model =
-    picked && modelIds.includes(picked) ? picked : modelData?.default ?? ""
+  const { model, models, pick, activeLabel } = answerModel
 
   const [input, setInput] = useState("")
   const selectedDocs = documents.filter((d) => selectedIds.has(d.id))
-  const canSend = input.trim().length > 0 && selectedIds.size > 0 && !disabled
+  const canSend = input.trim().length > 0 && selectedIds.size > 0 && !streaming
 
   function submit() {
     if (!canSend || !model) return
-    onSend(input.trim(), model)
+    onSend(input.trim())
     setInput("")
   }
-
-  function pickModel(id: string) {
-    setPicked(id)
-    localStorage.setItem(MODEL_STORAGE_KEY, id)
-  }
-
-  const activeLabel =
-    modelData?.models.find((m) => m.id === model)?.label ?? "Model"
 
   return (
     <div className="shrink-0 pb-6">
@@ -475,10 +507,10 @@ function Composer({
                 }
               />
               <DropdownMenuContent align="start" className="min-w-[200px]">
-                {modelData?.models.map((m) => (
+                {models.map((m) => (
                   <DropdownMenuItem
                     key={m.id}
-                    onClick={() => pickModel(m.id)}
+                    onClick={() => pick(m.id)}
                     className="justify-between"
                   >
                     {m.label}
@@ -488,19 +520,27 @@ function Composer({
               </DropdownMenuContent>
             </DropdownMenu>
 
-            <Button
-              size="icon"
-              className="size-9 rounded-[10px]"
-              disabled={!canSend}
-              onClick={submit}
-              aria-label="Send message"
-            >
-              {disabled ? (
-                <Loader2 className="animate-spin" />
-              ) : (
+            {streaming ? (
+              <Button
+                size="icon"
+                variant="outline"
+                className="size-9 rounded-[10px]"
+                onClick={onStop}
+                aria-label="Stop generating"
+              >
+                <Square className="size-3.5 fill-current" strokeWidth={2.3} />
+              </Button>
+            ) : (
+              <Button
+                size="icon"
+                className="size-9 rounded-[10px]"
+                disabled={!canSend}
+                onClick={submit}
+                aria-label="Send message"
+              >
                 <ArrowUp strokeWidth={2.3} />
-              )}
-            </Button>
+              </Button>
+            )}
           </div>
         </div>
       </div>

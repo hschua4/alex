@@ -221,6 +221,12 @@ export const message = pgTable(
     // The answer model + accounting (ADR-0010). Null on user turns.
     modelId: text("model_id"),
     tokenUsage: jsonb("token_usage").$type<TokenUsage>(),
+    // Regenerate is additive (CONTEXT §4.6): a re-answer is a *new* assistant
+    // message pointing at the one it supersedes, never a destructive overwrite —
+    // so the original answer survives and history stays honest. Null on originals
+    // and every user turn; a soft self-reference (no FK) so a later prune of an
+    // old answer can't orphan the chain.
+    regeneratedFrom: text("regenerated_from"),
     createdAt: timestamp("created_at", { withTimezone: true })
       .notNull()
       .default(sql`now()`),

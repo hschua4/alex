@@ -1,7 +1,7 @@
 import { zValidator } from "@hono/zod-validator"
 import { streamText, type LanguageModel } from "ai"
 import { eq } from "drizzle-orm"
-import { Hono } from "hono"
+import { Hono, type Context } from "hono"
 import { createMiddleware } from "hono/factory"
 import { streamSSE } from "hono/streaming"
 import { z } from "zod"
@@ -16,6 +16,7 @@ import {
   createUserMessage,
   deleteDocument,
   getDocument,
+  getMessage,
   getProject,
   getSession,
   listDocuments,
@@ -36,12 +37,15 @@ import type { Auth } from "./auth.ts"
 import {
   ANSWER_MODELS,
   buildPrompt,
+  CONDENSE_HISTORY_TURNS,
   DEFAULT_ANSWER_MODEL,
   isAllowedModel,
   OVER_FETCH,
   rankCandidates,
   SYSTEM_PROMPT,
   validateCitations,
+  type Condenser,
+  type CondenseTurn,
 } from "./chat/index.ts"
 import {
   MAX_PAGES,
@@ -81,6 +85,12 @@ export type ApiDeps = {
    * factory returning a mock model so no real generation runs in CI.
    */
   answerModel: (modelId: string) => LanguageModel
+  /**
+   * Rewrites a follow-up into a standalone retrieval query (CONTEXT §4.3). Pinned
+   * to `gpt-4o-mini`, never user-selectable; the route only calls it on follow-ups
+   * and falls back to the raw question. Faked deterministically in tests.
+   */
+  condense: Condenser
 }
 
 /** Node has a global `File` (undici); narrow a parsed field to it. */
@@ -203,6 +213,8 @@ export type MessageDto = {
   status: "complete" | "stopped" | "failed"
   selectedDocumentIds: string[]
   modelId: string | null
+  /** Set when this answer supersedes an earlier one (CONTEXT §4.6); else null. */
+  regeneratedFrom: string | null
   citations: CitationDto[]
   createdAt: string
 }
@@ -215,6 +227,7 @@ function toMessageDto(row: MessageWithCitations): MessageDto {
     status: row.status,
     selectedDocumentIds: row.selectedDocumentIds,
     modelId: row.modelId,
+    regeneratedFrom: row.regeneratedFrom,
     citations: row.citations
       .map((c) => ({
         n: c.n,
@@ -235,6 +248,18 @@ function deriveTitle(content: string): string {
   return trimmed.length > 60 ? `${trimmed.slice(0, 57)}…` : trimmed || "New chat"
 }
 
+/**
+ * The last ~N turns as condense context (CONTEXT §4.3), oldest-first. Only the
+ * role and text matter to the rewrite; citations and provenance are dropped.
+ */
+function toCondenseHistory(
+  messages: MessageWithCitations[],
+): CondenseTurn[] {
+  return messages
+    .slice(-CONDENSE_HISTORY_TURNS)
+    .map((m) => ({ role: m.role, content: m.content }))
+}
+
 /** Request body for the grounded-chat turn (ADR-0003 selection, ADR-0010 model). */
 const chatTurnSchema = z.object({
   // Omitted on the first turn of a new session; the server creates one.
@@ -243,6 +268,15 @@ const chatTurnSchema = z.object({
   // Send is blocked with 0 selected documents (ADR-0003) — enforced here too.
   selectedDocumentIds: z.array(z.string()).min(1, "Select at least one document"),
   // Validated against the server allowlist (ADR-0010); rejects anything else.
+  model: z.string().refine(isAllowedModel, "Unknown model"),
+})
+
+/**
+ * Request body for regenerating an answer (CONTEXT §4.6). The user turn and its
+ * document scope are reused from the message being regenerated; only the answer
+ * model is chosen afresh — so a re-answer can switch models, still allowlisted.
+ */
+const regenerateSchema = z.object({
   model: z.string().refine(isAllowedModel, "Unknown model"),
 })
 
@@ -271,13 +305,131 @@ function requireAuth(auth: Auth) {
  * real Postgres or a live better-auth instance.
  */
 export function createApi(deps: ApiDeps) {
-  const { db, auth, store, enqueueIngest, embedder, answerModel } = deps
+  const { db, auth, store, enqueueIngest, embedder, answerModel, condense } =
+    deps
 
   const app = new Hono<{ Variables: Variables }>()
 
   // better-auth owns everything under /auth (sign-in/up/out, session). It reads
   // and writes the httpOnly cookie itself; we just hand it the raw request.
   app.on(["GET", "POST"], "/auth/*", (c) => auth.handler(c.req.raw))
+
+  /**
+   * The grounded-answer engine shared by the initial turn and regenerate
+   * (CONTEXT §4.3–4.6). Given a resolved session, the question to answer, its
+   * owned document scope, and the prior turns, it: condenses the query on a
+   * follow-up, retrieves + ranks over the selected+indexed chunks, streams the
+   * answer as SSE, then validates the `[n]` markers and persists the finalized
+   * assistant message — before writing `done`, so the client never races a
+   * refetch. A cancelled stream is kept as `stopped`; `regeneratedFrom` links a
+   * re-answer to the one it supersedes without touching the original.
+   */
+  function streamAnswer(
+    c: Context<{ Variables: Variables }>,
+    params: {
+      session: ChatSession
+      userId: string
+      question: string
+      selected: string[]
+      history: CondenseTurn[]
+      model: string
+      regeneratedFrom?: string | null
+      startData?: Record<string, unknown>
+    },
+  ) {
+    const { session, userId, question, selected, history, model } = params
+    return streamSSE(c, async (stream) => {
+      // Let the client route to the (possibly new) session immediately.
+      await stream.writeSSE({
+        event: "start",
+        data: JSON.stringify({ sessionId: session.id, ...params.startData }),
+      })
+
+      // Condense a follow-up into a standalone query before retrieval; the first
+      // turn (empty history) is already standalone and skips the round-trip.
+      const query =
+        history.length > 0
+          ? await condense.condense({ question, history })
+          : question
+
+      // Retrieve: embed the (condensed) query, cosine search selected+indexed
+      // chunks, then apply the per-doc cap / floor / top-k ranking (ADR-0004).
+      const [queryEmbedding] = await embedder.embed([query])
+      const candidates = await retrieveCandidates(db, {
+        userId,
+        documentIds: selected,
+        queryEmbedding: queryEmbedding ?? [],
+        limit: OVER_FETCH,
+      })
+      const chunks = rankCandidates(candidates)
+
+      // Answer the user's actual question; grounding comes from the chunks the
+      // condensed query retrieved.
+      const result = streamText({
+        model: answerModel(model),
+        system: SYSTEM_PROMPT,
+        prompt: buildPrompt(question, chunks),
+        abortSignal: c.req.raw.signal,
+      })
+
+      let text = ""
+      let stopped = false
+      try {
+        for await (const delta of result.textStream) {
+          text += delta
+          await stream.writeSSE({
+            event: "delta",
+            data: JSON.stringify({ text: delta }),
+          })
+        }
+      } catch {
+        // Client aborted (or the model stream broke) — keep the partial answer.
+        stopped = true
+      }
+
+      // Validate the [n] markers and snapshot the cited chunks (ADR-0005).
+      const citations = validateCitations(text, chunks)
+      // Usage is only meaningful on a clean finish; on a stopped/broken stream it
+      // may never settle, so don't await it (it would hang the finalize).
+      const usage = stopped
+        ? undefined
+        : await result.usage.catch(() => undefined)
+
+      const assistant = await createAssistantMessage(db, {
+        sessionId: session.id,
+        userId,
+        content: text,
+        status: stopped ? "stopped" : "complete",
+        modelId: model,
+        tokenUsage: {
+          inputTokens: usage?.inputTokens ?? 0,
+          outputTokens: usage?.outputTokens ?? 0,
+          totalTokens: usage?.totalTokens ?? 0,
+        },
+        citations,
+        regeneratedFrom: params.regeneratedFrom ?? null,
+      })
+
+      // Finalized and persisted — hand the client the message + sources so it can
+      // render without a refetch race.
+      await stream.writeSSE({
+        event: "done",
+        data: JSON.stringify({
+          messageId: assistant.id,
+          status: assistant.status,
+          regeneratedFrom: assistant.regeneratedFrom,
+          citations: citations.map((c2) => ({
+            n: c2.n,
+            documentId: c2.documentId,
+            documentName: c2.documentName,
+            page: c2.page,
+            chunkIndex: c2.chunkIndex,
+            snippet: c2.snippet,
+          })),
+        }),
+      })
+    })
+  }
 
   return app
     .get("/health", async (c) => {
@@ -509,6 +661,12 @@ export function createApi(deps: ApiDeps) {
         if (sessionId && !session) {
           return c.json({ error: "not_found" as const }, 404)
         }
+        // Prior turns (before this one) become the condense context on a
+        // follow-up; a brand-new session has none, so its first turn skips
+        // condensing (CONTEXT §4.3). Read before persisting the new user turn.
+        const history = session
+          ? toCondenseHistory(await listMessages(db, userId, session.id))
+          : []
         if (!session) {
           session = await createSession(db, {
             projectId,
@@ -527,85 +685,82 @@ export function createApi(deps: ApiDeps) {
         })
         await touchSession(db, session.id)
 
-        // Retrieve: embed the query, cosine search selected+indexed chunks, then
-        // apply the per-doc cap / floor / top-k ranking (ADR-0004).
-        const [queryEmbedding] = await embedder.embed([content])
-        const candidates = await retrieveCandidates(db, {
+        return streamAnswer(c, {
+          session,
           userId,
-          documentIds: selected,
-          queryEmbedding: queryEmbedding ?? [],
-          limit: OVER_FETCH,
+          question: content,
+          selected,
+          history,
+          model,
+          startData: { userMessageId: userMessage.id },
         })
-        const chunks = rankCandidates(candidates)
+      },
+    )
+    // Regenerate an answer (CONTEXT §4.6): re-run the user turn a given assistant
+    // message answered, producing a *new* assistant message linked via
+    // `regeneratedFrom` — the original is never destroyed. The model can change
+    // (still allowlisted); the question and its document scope are reused.
+    .post(
+      "/projects/:projectId/chat/messages/:messageId/regenerate",
+      requireAuth(auth),
+      zValidator("json", regenerateSchema),
+      async (c) => {
+        const userId = c.get("userId")
+        const projectId = c.req.param("projectId")
+        const messageId = c.req.param("messageId")
+        const { model } = c.req.valid("json")
 
-        const result = streamText({
-          model: answerModel(model),
-          system: SYSTEM_PROMPT,
-          prompt: buildPrompt(content, chunks),
-          abortSignal: c.req.raw.signal,
-        })
+        // The message must be the user's, an assistant turn, in this project.
+        const target = await getMessage(db, userId, messageId)
+        if (!target || target.role !== "assistant") {
+          return c.json({ error: "not_found" as const }, 404)
+        }
+        const session = await getSession(db, userId, target.sessionId)
+        if (!session || session.projectId !== projectId) {
+          return c.json({ error: "not_found" as const }, 404)
+        }
 
-        const sessionId2 = session.id
-        return streamSSE(c, async (stream) => {
-          // Let the client route to the (possibly new) session immediately.
-          await stream.writeSSE({
-            event: "start",
-            data: JSON.stringify({
-              sessionId: sessionId2,
-              userMessageId: userMessage.id,
-            }),
-          })
-
-          let text = ""
-          let stopped = false
-          try {
-            for await (const delta of result.textStream) {
-              text += delta
-              await stream.writeSSE({
-                event: "delta",
-                data: JSON.stringify({ text: delta }),
-              })
-            }
-          } catch {
-            // Client aborted (or the model stream broke) — keep the partial answer.
-            stopped = true
+        // Find the user turn this answer responded to — the nearest user message
+        // before it — and reuse its question and document scope.
+        const all = await listMessages(db, userId, session.id)
+        const targetIndex = all.findIndex((m) => m.id === messageId)
+        let userTurnIndex = -1
+        for (let i = targetIndex - 1; i >= 0; i--) {
+          if (all[i]!.role === "user") {
+            userTurnIndex = i
+            break
           }
+        }
+        if (userTurnIndex === -1) {
+          return c.json({ error: "not_found" as const }, 404)
+        }
+        const userTurn = all[userTurnIndex]!
 
-          // Validate the [n] markers and snapshot the cited chunks (ADR-0005).
-          const citations = validateCitations(text, chunks)
-          const usage = await result.usage.catch(() => undefined)
+        // Re-scope to documents the user still owns in this project (tenancy) —
+        // a doc selected then deleted must drop out.
+        const owned = new Set(
+          (await listDocuments(db, userId, projectId)).map((d) => d.id),
+        )
+        const selected = userTurn.selectedDocumentIds.filter((id) =>
+          owned.has(id),
+        )
+        if (selected.length === 0) {
+          return c.json({ error: "invalid_documents" as const }, 400)
+        }
 
-          const assistant = await createAssistantMessage(db, {
-            sessionId: sessionId2,
-            userId,
-            content: text,
-            status: stopped ? "stopped" : "complete",
-            modelId: model,
-            tokenUsage: {
-              inputTokens: usage?.inputTokens ?? 0,
-              outputTokens: usage?.outputTokens ?? 0,
-              totalTokens: usage?.totalTokens ?? 0,
-            },
-            citations,
-          })
+        // Condense context is the turns before the user turn being re-answered.
+        const history = toCondenseHistory(all.slice(0, userTurnIndex))
+        await touchSession(db, session.id)
 
-          // Finalized and persisted — hand the client the message + sources so it
-          // can render without a refetch race.
-          await stream.writeSSE({
-            event: "done",
-            data: JSON.stringify({
-              messageId: assistant.id,
-              status: assistant.status,
-              citations: citations.map((c2) => ({
-                n: c2.n,
-                documentId: c2.documentId,
-                documentName: c2.documentName,
-                page: c2.page,
-                chunkIndex: c2.chunkIndex,
-                snippet: c2.snippet,
-              })),
-            }),
-          })
+        return streamAnswer(c, {
+          session,
+          userId,
+          question: userTurn.content,
+          selected,
+          history,
+          model,
+          regeneratedFrom: messageId,
+          startData: { regeneratedFrom: messageId },
         })
       },
     )

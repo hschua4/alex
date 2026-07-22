@@ -1,8 +1,11 @@
-import { useCallback, useState } from "react"
+import { useCallback, useRef, useState } from "react"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { useNavigate } from "react-router-dom"
 
 import { api } from "./api"
+
+/** The remembered answer-model pick, per ADR-0010 ("remember the last pick"). */
+export const MODEL_STORAGE_KEY = "alex.answerModel"
 
 /**
  * The live end of the chat seam (ADR-0009), replacing the mock chats/messages in
@@ -29,6 +32,28 @@ export function useModels() {
       return { models: [...data.models], default: data.default }
     },
   })
+}
+
+/**
+ * The effective answer model (ADR-0010): the user's remembered pick, falling back
+ * to the server default whenever nothing is stored or the stored id has dropped
+ * off the allowlist. Derived, never held in an effect. Shared by the composer and
+ * the regenerate action so both send the same model.
+ */
+export function useAnswerModel() {
+  const { data } = useModels()
+  const [picked, setPicked] = useState<string | null>(() =>
+    localStorage.getItem(MODEL_STORAGE_KEY),
+  )
+  const models = data?.models ?? []
+  const ids = models.map((m) => m.id)
+  const model = picked && ids.includes(picked) ? picked : data?.default ?? ""
+  const pick = useCallback((id: string) => {
+    setPicked(id)
+    localStorage.setItem(MODEL_STORAGE_KEY, id)
+  }, [])
+  const activeLabel = models.find((m) => m.id === model)?.label ?? "Model"
+  return { model, models, pick, activeLabel }
 }
 
 // ── sessions ─────────────────────────────────────────────────────────────────
@@ -101,6 +126,8 @@ export type ChatMessage = {
   role: "user" | "assistant"
   content: string
   status: "complete" | "stopped" | "failed"
+  /** Set when this answer supersedes an earlier one (CONTEXT §4.6); else null. */
+  regeneratedFrom: string | null
   citations: Citation[]
 }
 
@@ -111,6 +138,7 @@ type MessageDto = {
   status: "complete" | "stopped" | "failed"
   selectedDocumentIds: string[]
   modelId: string | null
+  regeneratedFrom: string | null
   citations: Citation[]
   createdAt: string
 }
@@ -138,6 +166,7 @@ export function useMessages(sessionId: string | undefined) {
         role: m.role,
         content: m.content,
         status: m.status,
+        regeneratedFrom: m.regeneratedFrom,
         citations: m.citations,
       }))
     },
@@ -146,10 +175,16 @@ export function useMessages(sessionId: string | undefined) {
 
 // ── the grounded-answer turn (streamed over SSE) ─────────────────────────────
 
-/** The in-flight turn: the user's message and the answer accumulating live. */
+/**
+ * The in-flight turn: the answer accumulating live. `userContent` is the user
+ * bubble to render on a fresh send; a *regenerate* omits it (no new question) and
+ * instead names the answer it is replacing so the transcript can hide it while the
+ * new one streams in its place.
+ */
 export type PendingTurn = {
-  userContent: string
+  userContent?: string
   assistantText: string
+  regeneratingFrom?: string
   error?: string
 }
 
@@ -179,34 +214,48 @@ function drainEvents(buffer: string): { events: SSERecord[]; rest: string } {
 
 type SSERecord = { event: string; data: Record<string, unknown> }
 
+type RegenerateInput = {
+  /** The assistant message being re-answered; the new answer replaces it in view. */
+  messageId: string
+  model: string
+  sessionId: string
+}
+
 /**
- * Stream a grounded answer for one turn (CONTEXT §4). Posts the turn, then reads
- * the SSE stream: `start` carries the (possibly new) session id — on a new chat we
- * route to it immediately; `delta` events grow the live answer; `done` fires after
- * the server has persisted and validated the assistant message, so we refetch the
- * session's messages (now with citations) and clear the live turn. Returns the
- * pending turn so the UI can render the user bubble and the streaming answer.
+ * Stream a grounded answer for one turn (CONTEXT §4), for both a fresh send and a
+ * regenerate. Posts the turn, then reads the SSE stream: `start` carries the
+ * (possibly new) session id — on a new chat we route to it immediately; `delta`
+ * events grow the live answer; on stream-end the server has already persisted and
+ * validated the assistant message, so we refetch the session's messages (now with
+ * citations) and clear the live turn.
+ *
+ * `stop()` aborts the in-flight request; the server keeps the partial answer as
+ * `stopped` (CONTEXT §4.6), so an abort is a normal end, not an error — we refetch
+ * and clear rather than surfacing a failure.
  */
 export function useChatStream(projectId: string) {
   const queryClient = useQueryClient()
   const navigate = useNavigate()
   const [pending, setPending] = useState<PendingTurn | null>(null)
+  const controllerRef = useRef<AbortController | null>(null)
 
-  const send = useCallback(
-    async (input: SendInput) => {
-      setPending({ userContent: input.content, assistantText: "" })
-      let sessionId = input.sessionId
+  const runStream = useCallback(
+    async (
+      url: string,
+      body: unknown,
+      opts: { seed: PendingTurn; sessionId?: string; isNewSession: boolean },
+    ) => {
+      setPending(opts.seed)
+      let sessionId = opts.sessionId
+      const controller = new AbortController()
+      controllerRef.current = controller
 
       try {
-        const res = await fetch(`/api/projects/${projectId}/chat`, {
+        const res = await fetch(url, {
           method: "POST",
           headers: { "content-type": "application/json" },
-          body: JSON.stringify({
-            sessionId: input.sessionId,
-            content: input.content,
-            selectedDocumentIds: input.selectedDocumentIds,
-            model: input.model,
-          }),
+          body: JSON.stringify(body),
+          signal: controller.signal,
         })
         if (!res.ok || !res.body) {
           throw new Error("The answer could not be generated.")
@@ -224,7 +273,7 @@ export function useChatStream(projectId: string) {
           for (const { event, data } of events) {
             if (event === "start") {
               sessionId = data.sessionId as string
-              if (!input.sessionId) {
+              if (opts.isNewSession) {
                 navigate(`/p/${projectId}/chat/${sessionId}`, { replace: true })
               }
             } else if (event === "delta") {
@@ -238,16 +287,14 @@ export function useChatStream(projectId: string) {
           }
         }
 
-        // Persisted answer + updated session ordering are now authoritative.
-        if (sessionId) {
-          await queryClient.invalidateQueries({
-            queryKey: messagesKey(sessionId),
-          })
-        }
-        await queryClient.invalidateQueries({ queryKey: sessionsKey(projectId) })
-        queryClient.invalidateQueries({ queryKey: ["projects"] })
-        setPending(null)
+        await settle(sessionId)
       } catch (err) {
+        // An abort is a deliberate stop: the server persisted the partial as
+        // `stopped`, so refetch and clear rather than showing an error.
+        if (controller.signal.aborted) {
+          await settle(sessionId)
+          return
+        }
         setPending((p) =>
           p
             ? {
@@ -257,12 +304,65 @@ export function useChatStream(projectId: string) {
               }
             : p,
         )
+      } finally {
+        if (controllerRef.current === controller) controllerRef.current = null
+      }
+
+      // Persisted answer + updated session ordering are now authoritative.
+      async function settle(id: string | undefined) {
+        if (id) {
+          await queryClient.invalidateQueries({ queryKey: messagesKey(id) })
+        }
+        await queryClient.invalidateQueries({ queryKey: sessionsKey(projectId) })
+        queryClient.invalidateQueries({ queryKey: ["projects"] })
+        setPending(null)
       }
     },
     [projectId, navigate, queryClient],
   )
 
+  const send = useCallback(
+    (input: SendInput) =>
+      runStream(
+        `/api/projects/${projectId}/chat`,
+        {
+          sessionId: input.sessionId,
+          content: input.content,
+          selectedDocumentIds: input.selectedDocumentIds,
+          model: input.model,
+        },
+        {
+          seed: { userContent: input.content, assistantText: "" },
+          sessionId: input.sessionId,
+          isNewSession: !input.sessionId,
+        },
+      ),
+    [projectId, runStream],
+  )
+
+  const regenerate = useCallback(
+    (input: RegenerateInput) =>
+      runStream(
+        `/api/projects/${projectId}/chat/messages/${input.messageId}/regenerate`,
+        { model: input.model },
+        {
+          seed: { assistantText: "", regeneratingFrom: input.messageId },
+          sessionId: input.sessionId,
+          isNewSession: false,
+        },
+      ),
+    [projectId, runStream],
+  )
+
+  const stop = useCallback(() => controllerRef.current?.abort(), [])
   const dismissError = useCallback(() => setPending(null), [])
 
-  return { pending, send, dismissError, isStreaming: pending !== null }
+  return {
+    pending,
+    send,
+    regenerate,
+    stop,
+    dismissError,
+    isStreaming: pending !== null,
+  }
 }

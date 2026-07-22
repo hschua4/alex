@@ -2,6 +2,7 @@ export {
   createAssistantMessage,
   createSession,
   createUserMessage,
+  getMessage,
   getSession,
   listMessages,
   listSessions,

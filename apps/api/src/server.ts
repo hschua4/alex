@@ -6,7 +6,10 @@ import { createDb, databaseUrl, markFailed } from "@alex/db"
 
 import { createApi } from "./app.ts"
 import { createAuth } from "./auth.ts"
-import { createOpenRouterAnswerModel } from "./chat/index.ts"
+import {
+  createOpenRouterAnswerModel,
+  createOpenRouterCondenser,
+} from "./chat/index.ts"
 import {
   createIngestQueue,
   createOpenAIEmbedder,
@@ -55,6 +58,14 @@ const answerModel = createOpenRouterAnswerModel({
   baseURL: process.env.OPENROUTER_BASE_URL ?? "https://openrouter.ai/api/v1",
 })
 
+// Follow-up condensing (CONTEXT §4.3) is pinned to gpt-4o-mini, env-configurable
+// via CONDENSE_MODEL, on the same OpenRouter key and base URL as the answer model.
+const condense = createOpenRouterCondenser({
+  apiKey: required("OPENROUTER_API_KEY"),
+  baseURL: process.env.OPENROUTER_BASE_URL ?? "https://openrouter.ai/api/v1",
+  model: process.env.CONDENSE_MODEL,
+})
+
 // Ingestion queue on the same Postgres (ADR-0006), worker in-process with a hard
 // concurrency cap (INGEST_CONCURRENCY) so it can't starve chat latency.
 const queue = createIngestQueue(databaseUrl())
@@ -77,6 +88,7 @@ app.route(
     enqueueIngest: queue.enqueue,
     embedder,
     answerModel,
+    condense,
   }),
 )
 

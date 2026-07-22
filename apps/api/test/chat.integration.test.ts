@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto"
 import { fileURLToPath } from "node:url"
 
 import { PostgreSqlContainer, type StartedPostgreSqlContainer } from "@testcontainers/postgresql"
+import type { LanguageModel } from "ai"
 import { eq } from "drizzle-orm"
 import { migrate } from "drizzle-orm/postgres-js/migrator"
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest"
@@ -18,7 +19,12 @@ import {
 
 import { createApi, type SessionUser } from "../src/app.ts"
 import type { Auth } from "../src/auth.ts"
-import { DEFAULT_ANSWER_MODEL, rankCandidates } from "../src/chat/index.ts"
+import {
+  createPassthroughCondenser,
+  DEFAULT_ANSWER_MODEL,
+  rankCandidates,
+  type Condenser,
+} from "../src/chat/index.ts"
 import {
   createFakeEmbedder,
   createMemoryStore,
@@ -27,7 +33,7 @@ import {
   type ObjectStore,
 } from "../src/ingest/index.ts"
 import { makePdf } from "./fixtures/make-pdf.ts"
-import { mockStreamModel } from "./mocks/models.ts"
+import { mockBrokenStreamModel, mockStreamModel } from "./mocks/models.ts"
 
 /**
  * The grounded-chat path against real pgvector (ADR-0012): the retrieval filter
@@ -80,15 +86,26 @@ describe("grounded chat (real pgvector)", () => {
   let store: ObjectStore
   let projectId: string
 
-  /** Build the API with a given answer text the mock model will stream back. */
-  function makeApi(answerText: string) {
+  /**
+   * Build the API with a given answer text the mock model will stream back.
+   * `opts` swaps in a broken-stream model (stopped path) or a spy condenser
+   * (follow-up condensing) for the tests that need them.
+   */
+  function makeApi(
+    answerText: string,
+    opts: {
+      answerModel?: () => LanguageModel
+      condense?: Condenser
+    } = {},
+  ) {
     return createApi({
       db,
       auth: fakeAuth(user),
       store,
       enqueueIngest: async () => {},
       embedder,
-      answerModel: () => mockStreamModel(answerText),
+      answerModel: opts.answerModel ?? (() => mockStreamModel(answerText)),
+      condense: opts.condense ?? createPassthroughCondenser(),
     })
   }
 
@@ -127,6 +144,23 @@ describe("grounded chat (real pgvector)", () => {
       headers: { "content-type": "application/json" },
       body: JSON.stringify(body),
     })
+    expect(res.status).toBe(200)
+    return parseSSE(await res.text())
+  }
+
+  async function regenerateRequest(
+    api: ReturnType<typeof createApi>,
+    messageId: string,
+    model: string,
+  ): Promise<SSEEvent[]> {
+    const res = await api.request(
+      `/projects/${projectId}/chat/messages/${messageId}/regenerate`,
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ model }),
+      },
+    )
     expect(res.status).toBe(200)
     return parseSSE(await res.text())
   }
@@ -305,5 +339,168 @@ describe("grounded chat (real pgvector)", () => {
       "user",
       "assistant",
     ])
+  })
+
+  it("condenses a follow-up but not the first turn (CONTEXT §4.3)", async () => {
+    const calls: { question: string; history: { role: string }[] }[] = []
+    const condense: Condenser = {
+      condense: async (input) => {
+        calls.push(input)
+        return input.question
+      },
+    }
+    const api = makeApi("An answer [1].", { condense })
+    const docId = await ingest(
+      api,
+      ["Widget pricing details and product specifications."],
+      "widget.pdf",
+    )
+    const firstQuestion = await firstChunkContent(docId)
+
+    const first = await chatRequest(api, {
+      content: firstQuestion,
+      selectedDocumentIds: [docId],
+      model: DEFAULT_ANSWER_MODEL,
+    })
+    const sessionId = first.find((e) => e.event === "start")!.data
+      .sessionId as string
+    // The first message is already standalone — the condenser is never called.
+    expect(calls).toHaveLength(0)
+
+    await chatRequest(api, {
+      sessionId,
+      content: "what about its pricing?",
+      selectedDocumentIds: [docId],
+      model: DEFAULT_ANSWER_MODEL,
+    })
+    // The follow-up is condensed, with the prior user+assistant turns as context.
+    expect(calls).toHaveLength(1)
+    expect(calls[0]!.question).toBe("what about its pricing?")
+    expect(calls[0]!.history.map((h) => h.role)).toEqual(["user", "assistant"])
+  })
+
+  it("scopes each turn's retrieval to that turn's selected set (ADR-0003)", async () => {
+    const api = makeApi("Grounded [1].")
+    const docA = await ingest(
+      api,
+      ["Alpha paper: chlorophyll drives photosynthesis in green plants."],
+      "alpha.pdf",
+    )
+    const docB = await ingest(
+      api,
+      ["Beta paper: quantum entanglement links distant particles in physics."],
+      "beta.pdf",
+    )
+    const qA = await firstChunkContent(docA)
+    const qB = await firstChunkContent(docB)
+
+    // Turn 1 selects only A.
+    const first = await chatRequest(api, {
+      content: qA,
+      selectedDocumentIds: [docA],
+      model: DEFAULT_ANSWER_MODEL,
+    })
+    const sessionId = first.find((e) => e.event === "start")!.data
+      .sessionId as string
+    const firstCites = first.find((e) => e.event === "done")!.data
+      .citations as { documentId: string }[]
+    expect(firstCites.every((c) => c.documentId === docA)).toBe(true)
+
+    // Turn 2 changes the scope to only B and asks about B.
+    const second = await chatRequest(api, {
+      sessionId,
+      content: qB,
+      selectedDocumentIds: [docB],
+      model: DEFAULT_ANSWER_MODEL,
+    })
+    const secondCites = second.find((e) => e.event === "done")!.data
+      .citations as { documentId: string }[]
+    expect(secondCites.length).toBeGreaterThan(0)
+    expect(secondCites.every((c) => c.documentId === docB)).toBe(true)
+
+    // The second user turn records its own selection.
+    const messages = await listMessages(db, user.id, sessionId)
+    expect(messages[2]!.selectedDocumentIds).toEqual([docB])
+  })
+
+  it("keeps a cancelled stream as a stopped partial (CONTEXT §4.6)", async () => {
+    const api = makeApi("noop", {
+      answerModel: () => mockBrokenStreamModel("Half of an ans"),
+    })
+    const docId = await ingest(
+      api,
+      ["Retrievable content about steam turbine efficiency."],
+      "turbine.pdf",
+    )
+    const question = await firstChunkContent(docId)
+
+    const events = await chatRequest(api, {
+      content: question,
+      selectedDocumentIds: [docId],
+      model: DEFAULT_ANSWER_MODEL,
+    })
+    expect(events.find((e) => e.event === "done")!.data.status).toBe("stopped")
+
+    const sessionId = events.find((e) => e.event === "start")!.data
+      .sessionId as string
+    const assistant = (await listMessages(db, user.id, sessionId))[1]!
+    expect(assistant.status).toBe("stopped")
+    expect(assistant.content).toBe("Half of an ans")
+  })
+
+  it("regenerate adds a linked answer without destroying the original", async () => {
+    const api = makeApi("Original answer [1].")
+    const docId = await ingest(
+      api,
+      ["Content describing the standalone widget specification."],
+      "spec.pdf",
+    )
+    const question = await firstChunkContent(docId)
+
+    const first = await chatRequest(api, {
+      content: question,
+      selectedDocumentIds: [docId],
+      model: DEFAULT_ANSWER_MODEL,
+    })
+    const sessionId = first.find((e) => e.event === "start")!.data
+      .sessionId as string
+    const original = (await listMessages(db, user.id, sessionId))[1]!
+    expect(original.role).toBe("assistant")
+
+    // Regenerate the answer, switching to another allowlisted model.
+    const events = await regenerateRequest(
+      api,
+      original.id,
+      "anthropic/claude-3.5-haiku",
+    )
+    expect(events.find((e) => e.event === "done")!.data.regeneratedFrom).toBe(
+      original.id,
+    )
+
+    const messages = await listMessages(db, user.id, sessionId)
+    expect(messages.map((m) => m.role)).toEqual([
+      "user",
+      "assistant",
+      "assistant",
+    ])
+    const [, a1, a2] = messages
+    // The original survives untouched; the re-answer links back to it.
+    expect(a1!.id).toBe(original.id)
+    expect(a1!.regeneratedFrom).toBeNull()
+    expect(a2!.regeneratedFrom).toBe(original.id)
+    expect(a2!.modelId).toBe("anthropic/claude-3.5-haiku")
+  })
+
+  it("404s regenerate for a non-existent message", async () => {
+    const api = makeApi("noop")
+    const res = await api.request(
+      `/projects/${projectId}/chat/messages/${randomUUID()}/regenerate`,
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ model: DEFAULT_ANSWER_MODEL }),
+      },
+    )
+    expect(res.status).toBe(404)
   })
 })
