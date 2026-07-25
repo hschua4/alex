@@ -471,7 +471,7 @@ describe("grounded chat (real pgvector)", () => {
     const events = await regenerateRequest(
       api,
       original.id,
-      "anthropic/claude-3.5-haiku",
+      "anthropic/claude-haiku-4.5",
     )
     expect(events.find((e) => e.event === "done")!.data.regeneratedFrom).toBe(
       original.id,
@@ -488,7 +488,7 @@ describe("grounded chat (real pgvector)", () => {
     expect(a1!.id).toBe(original.id)
     expect(a1!.regeneratedFrom).toBeNull()
     expect(a2!.regeneratedFrom).toBe(original.id)
-    expect(a2!.modelId).toBe("anthropic/claude-3.5-haiku")
+    expect(a2!.modelId).toBe("anthropic/claude-haiku-4.5")
   })
 
   it("404s regenerate for a non-existent message", async () => {

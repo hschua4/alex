@@ -17,14 +17,14 @@ export type AnswerModel = { id: string; label: string }
 
 /** The models the picker may offer. All routed via OpenRouter (CONTEXT §7). */
 export const ANSWER_MODELS: readonly AnswerModel[] = [
-  { id: "anthropic/claude-3.7-sonnet", label: "Claude 3.7 Sonnet" },
-  { id: "anthropic/claude-3.5-haiku", label: "Claude 3.5 Haiku" },
+  { id: "anthropic/claude-sonnet-5", label: "Claude Sonnet 5" },
+  { id: "anthropic/claude-haiku-4.5", label: "Claude Haiku 4.5" },
   { id: "openai/gpt-4o", label: "GPT-4o" },
   { id: "openai/gpt-4o-mini", label: "GPT-4o mini" },
 ]
 
 /** The default answer model, pre-selected until the user picks another. */
-export const DEFAULT_ANSWER_MODEL = "anthropic/claude-3.7-sonnet"
+export const DEFAULT_ANSWER_MODEL = "anthropic/claude-sonnet-5"
 
 /** The allowed ids, for the route's server-side validation. */
 export const ANSWER_MODEL_IDS = ANSWER_MODELS.map((m) => m.id)
