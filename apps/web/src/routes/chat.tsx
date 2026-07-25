@@ -12,6 +12,7 @@ import {
 import { Link, Navigate, useNavigate, useParams } from "react-router-dom"
 
 import { DocBadge } from "@/components/doc-badge"
+import { Markdown } from "@/components/markdown"
 import { ProjectSidebarHeader } from "@/components/project-sidebar-header"
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
@@ -301,10 +302,10 @@ function AssistantStreaming({
         {error ? (
           <p className="text-[14.5px] leading-[1.65] text-destructive">{error}</p>
         ) : text ? (
-          <p className="whitespace-pre-wrap text-[14.5px] leading-[1.65] text-foreground/90">
-            <InlineCitations text={text} />
+          <div>
+            <Markdown>{text}</Markdown>
             <span className="ml-0.5 inline-block h-4 w-[2px] translate-y-0.5 animate-pulse bg-primary align-middle" />
-          </p>
+          </div>
         ) : (
           <div className="flex items-center gap-2 text-muted-foreground">
             <Loader2 className="size-4 animate-spin" />
@@ -333,9 +334,7 @@ function MessageBubble({
     <div className="flex gap-3.5">
       <AssistantAvatar />
       <div className="min-w-0 flex-1">
-        <p className="whitespace-pre-wrap text-[14.5px] leading-[1.65] text-foreground/90">
-          <InlineCitations text={message.content} onClick={onOpenSources} />
-        </p>
+        <Markdown onCitationClick={onOpenSources}>{message.content}</Markdown>
         {message.status === "stopped" && (
           <p className="mt-2 text-xs italic text-muted-foreground">
             Generation stopped.
@@ -373,35 +372,6 @@ function MessageBubble({
         )}
       </div>
     </div>
-  )
-}
-
-/** Renders assistant text, turning "[n]" markers into clickable superscripts. */
-function InlineCitations({
-  text,
-  onClick,
-}: {
-  text: string
-  onClick?: () => void
-}) {
-  const parts = text.split(/(\[\d+\])/g)
-  return (
-    <>
-      {parts.map((part, i) => {
-        const match = /^\[(\d+)\]$/.exec(part)
-        if (!match) return <span key={i}>{part}</span>
-        return (
-          <button
-            key={i}
-            type="button"
-            onClick={onClick}
-            className="mx-0.5 -translate-y-1 align-super text-[10px] font-bold text-primary hover:underline"
-          >
-            [{match[1]}]
-          </button>
-        )
-      })}
-    </>
   )
 }
 
