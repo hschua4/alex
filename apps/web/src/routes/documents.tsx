@@ -2,13 +2,12 @@ import { useRef } from "react"
 import {
   FileText,
   Loader2,
-  MessageSquare,
   MoreVertical,
   RotateCw,
   Trash2,
   Upload,
 } from "lucide-react"
-import { Link, Navigate, useParams } from "react-router-dom"
+import { Navigate, useParams } from "react-router-dom"
 import { toast } from "sonner"
 
 import { DocBadge } from "@/components/doc-badge"
@@ -66,19 +65,6 @@ export function DocumentsScreen() {
       {/* project sub-nav */}
       <aside className="flex w-[264px] shrink-0 flex-col border-r bg-card">
         <ProjectSidebarHeader project={project} />
-        <nav className="flex flex-col gap-0.5 p-3">
-          <Link
-            to={`/p/${projectId}/chat`}
-            className="flex items-center gap-3 rounded-[9px] px-3 py-2.5 text-sm font-medium text-foreground/70 transition-colors hover:bg-secondary"
-          >
-            <MessageSquare className="size-[17px]" strokeWidth={2} />
-            Chats
-          </Link>
-          <span className="flex items-center gap-3 rounded-[9px] bg-accent px-3 py-2.5 text-sm font-semibold text-accent-foreground">
-            <FileText className="size-[17px]" strokeWidth={2} />
-            Documents
-          </span>
-        </nav>
       </aside>
 
       {/* documents main */}
