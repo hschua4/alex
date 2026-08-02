@@ -81,6 +81,11 @@ The existing Cloudflare Origin Cert's `*.hschua.com` SAN already covers
 
 ### 1.5 GitHub secrets on `hschua4/alex`
 
+These live on the **`production` environment**, not at repo level. The deploy
+job declares `environment: production` to reach them — `secrets: inherit` alone
+forwards only repo/org secrets, so dropping that line makes every value below
+resolve to an empty string.
+
 | Secret | Value |
 |---|---|
 | `TS_OAUTH_CLIENT_ID` / `TS_OAUTH_SECRET` | Tailscale OAuth client with the `tag:ci` scope |

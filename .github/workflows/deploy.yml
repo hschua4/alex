@@ -33,6 +33,11 @@ jobs:
   deploy:
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    # Every secret this job needs (tailnet OAuth, VPS SSH) lives on the
+    # `production` environment, not at repo level. `secrets: inherit` in the
+    # caller does not reach environment secrets — only declaring the
+    # environment here does.
+    environment: production
     steps:
       # Ephemeral tailnet node for this run; SSH on the VPS is bound to
       # Tailscale only, with no public :22 (DEPLOYMENT.md #11).
