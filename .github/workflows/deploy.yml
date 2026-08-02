@@ -52,6 +52,7 @@ jobs:
         env:
           SSH_PRIVATE_KEY: ${{ secrets.VPS_SSH_KEY }}
           SSH_KNOWN_HOSTS: ${{ secrets.VPS_SSH_KNOWN_HOSTS }}
+          VPS_HOST: ${{ secrets.VPS_HOST }}
         run: |
           install -d -m 700 ~/.ssh
           printf '%s\n' "$SSH_PRIVATE_KEY" > ~/.ssh/id_ed25519
@@ -61,13 +62,30 @@ jobs:
           printf '%s\n' "$SSH_KNOWN_HOSTS" > ~/.ssh/known_hosts
           chmod 644 ~/.ssh/known_hosts
 
+          # A pinned entry only matches the *exact* string VPS_HOST holds: an
+          # entry for the MagicDNS name does not match a 100.x.y.z VPS_HOST, and
+          # vice versa. Check it here so a mismatch reports itself, instead of
+          # surfacing as a bare "Host key verification failed." in the deploy.
+          if ssh-keygen -F "$VPS_HOST" -f ~/.ssh/known_hosts > /dev/null; then
+            echo "known_hosts has a pinned entry for VPS_HOST"
+          else
+            echo "::error::VPS_SSH_KNOWN_HOSTS has no entry matching VPS_HOST."
+            echo "Pinned entries are keyed on:"
+            grep -v '^#' ~/.ssh/known_hosts | cut -d' ' -f1 | sort -u
+            echo "The box currently offers (UNVERIFIED — compare, do not paste blindly):"
+            ssh-keyscan "$VPS_HOST" 2>/dev/null || echo "  (keyscan returned nothing)"
+            echo "Fix: re-run 'ssh-keyscan <exact VPS_HOST value>' and update the secret."
+            exit 1
+          fi
+
       - name: Pull, migrate, swap
         env:
           VPS_HOST: ${{ secrets.VPS_HOST }}
           VPS_USER: ${{ secrets.VPS_USER }}
           TAG: ${{ inputs.tag }}
         run: |
-          ssh -o BatchMode=yes "$VPS_USER@$VPS_HOST" TAG="$TAG" 'bash -euo pipefail -s' <<'REMOTE'
+          ssh -o BatchMode=yes -o StrictHostKeyChecking=yes \
+            "$VPS_USER@$VPS_HOST" TAG="$TAG" 'bash -euo pipefail -s' <<'REMOTE'
           cd /srv/alex
 
           # Persist the tag in .env so a later manual `docker compose up -d`

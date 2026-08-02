@@ -92,7 +92,20 @@ resolve to an empty string.
 | `VPS_HOST` | The box's tailnet hostname or `100.x.y.z` address |
 | `VPS_USER` | `deploy` |
 | `VPS_SSH_KEY` | Private key whose public half is in `deploy`'s `authorized_keys` |
-| `VPS_SSH_KNOWN_HOSTS` | Output of `ssh-keyscan <tailnet-host>` — pins the host key so the deploy fails closed |
+| `VPS_SSH_KNOWN_HOSTS` | Output of `ssh-keyscan "$VPS_HOST"` — pins the host key so the deploy fails closed |
+
+`VPS_SSH_KNOWN_HOSTS` must be keyscanned against the **exact** string in
+`VPS_HOST`: SSH matches known_hosts entries on the literal name it was given, so
+an entry for the MagicDNS name will not match a `100.x.y.z` `VPS_HOST`, and vice
+versa. The deploy's *Configure SSH* step checks this with `ssh-keygen -F` and
+prints both sides on a mismatch — a bare `Host key verification failed.` from
+the deploy step itself means the pin is stale or keyed on the wrong name.
+
+Regenerate after any VPS rebuild:
+
+```bash
+ssh-keyscan <exact VPS_HOST value> | gh secret set VPS_SSH_KNOWN_HOSTS --env production
+```
 
 No application secrets go in GitHub: CI never holds prod credentials
 (skylab decision #9).
