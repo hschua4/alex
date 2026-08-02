@@ -84,8 +84,18 @@ jobs:
           VPS_USER: ${{ secrets.VPS_USER }}
           TAG: ${{ inputs.tag }}
         run: |
-          ssh -o BatchMode=yes -o StrictHostKeyChecking=yes \
-            "$VPS_USER@$VPS_HOST" TAG="$TAG" 'bash -euo pipefail -s' <<'REMOTE'
+          # The remote script is shipped as a *file* and run with stdin closed —
+          # never streamed into `bash -s`. `bash -s` reads its script from stdin
+          # incrementally, so the first command that consumes stdin swallows the
+          # rest of it: `docker compose run` attaches the container to stdin and
+          # ate everything after the migrate step. Bash then hit EOF and exited
+          # 0, so a half-finished deploy (pulled + migrated, never swapped)
+          # reported itself as a green build.
+          #
+          # base64 sidesteps shell quoting on the way over — the script contains
+          # both single and double quotes, so it cannot be passed as a quoted
+          # `bash -c` argument.
+          cat > remote.sh <<'REMOTE'
           cd /srv/alex
 
           # Persist the tag in .env so a later manual `docker compose up -d`
@@ -103,7 +113,7 @@ jobs:
           # container still serving. Migrations must be expand/contract so the
           # running old code tolerates the new schema (DEPLOYMENT.md #7).
           echo "==> migrating"
-          docker compose run --rm migrate
+          docker compose run --rm -T migrate
 
           # Vanilla Compose has no start-first strategy (DEPLOYMENT.md #8), so
           # this is a recreate: a few seconds of downtime, same as Odin.
@@ -124,3 +134,10 @@ jobs:
           printf '%s\n' "${TAG}" > /srv/alex/CURRENT_SHA
           echo "==> deployed ${TAG}"
           REMOTE
+
+          # `&&`, not a newline: the remote login shell has no `set -e`, so a
+          # failed decode must not fall through to running a truncated script.
+          ssh -o BatchMode=yes -o StrictHostKeyChecking=yes \
+            "$VPS_USER@$VPS_HOST" \
+            "printf %s '$(base64 -w0 remote.sh)' | base64 -d > /tmp/alex-deploy.sh && TAG='$TAG' bash -euo pipefail /tmp/alex-deploy.sh < /dev/null" \
+            < /dev/null
