@@ -1,0 +1,79 @@
+# Alex production stack — deployed to /srv/alex/docker-compose.yml on the
+# Skylab VPS. Pairs with /srv/alex/.env (chmod 600, deploy:deploy).
+#
+# Joins the two external Skylab networks: `proxy` for Traefik routing and
+# `postgres` for the shared database. Alex owns no volume — originals live in
+# R2 (ADR-0007) and all state is in the shared Postgres, so the container is
+# disposable.
+
+services:
+  alex:
+    image: ghcr.io/hschua4/alex:${ALEX_IMAGE_TAG:-latest}
+    container_name: alex
+    restart: unless-stopped
+    init: true
+    env_file: .env
+    mem_limit: 512m
+    # Keep V8's heap below the cgroup limit so a large PDF triggers GC instead
+    # of an OOM kill. Ingestion holds a whole document in memory (≤20 MB,
+    # ≤300 pages — ADR-0011).
+    environment:
+      NODE_OPTIONS: --max-old-space-size=448
+    networks:
+      - proxy
+      - postgres
+    labels:
+      - "traefik.enable=true"
+      - "traefik.docker.network=proxy"
+      - "traefik.http.routers.alex.rule=Host(`alex.hschua.com`)"
+      - "traefik.http.routers.alex.entrypoints=websecure"
+      - "traefik.http.routers.alex.tls=true"
+      - "traefik.http.routers.alex.middlewares=secure-headers@file"
+      - "traefik.http.services.alex.loadbalancer.server.port=3000"
+    # Overrides the image HEALTHCHECK only to restate it explicitly at the
+    # deploy surface; Traefik drops unhealthy containers from the LB.
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:3000/api/health >/dev/null 2>&1 || exit 1"]
+      interval: 15s
+      timeout: 5s
+      start_period: 30s
+      retries: 3
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # One-shot migration runner (DEPLOYMENT.md #7). Behind a profile so
+  # `docker compose up -d` never starts it; the deploy runs it explicitly:
+  #   docker compose run --rm migrate
+  # A non-zero exit halts the deploy before the app container is swapped.
+  migrate:
+    image: ghcr.io/hschua4/alex:${ALEX_IMAGE_TAG:-latest}
+    profiles: ["tools"]
+    env_file: .env
+    mem_limit: 256m
+    working_dir: /app/packages/db
+    command: ["node", "--import", "tsx", "src/migrate.ts"]
+    networks:
+      - postgres
+    restart: "no"
+
+  # Invite-only signup (CONTEXT §1). Also profile-gated — run by hand:
+  #   docker compose run --rm invite add someone@example.com
+  invite:
+    image: ghcr.io/hschua4/alex:${ALEX_IMAGE_TAG:-latest}
+    profiles: ["tools"]
+    env_file: .env
+    mem_limit: 256m
+    working_dir: /app/apps/api
+    entrypoint: ["node", "--import", "tsx", "src/invite-cli.ts"]
+    networks:
+      - postgres
+    restart: "no"
+
+networks:
+  proxy:
+    external: true
+  postgres:
+    external: true

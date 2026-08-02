@@ -1,0 +1,29 @@
+# Never ship dependency trees or build output — the image builds its own.
+node_modules
+**/node_modules
+apps/web/dist
+dist
+build
+.turbo
+coverage
+
+# Secrets and local-only files. `.env.example` is excluded too: the image takes
+# its config from the compose `env_file` on the VPS, never from a baked file.
+.env
+**/.env
+.env.*
+**/.env.*
+
+# VCS, editor, OS noise
+.git
+.github
+.gitignore
+.DS_Store
+*.log
+
+# Docs and design artifacts — not needed at build or run time.
+docs
+CONTEXT.md
+README.md
+deploy
+RAG Chat App.html

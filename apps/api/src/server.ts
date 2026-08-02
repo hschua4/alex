@@ -33,7 +33,8 @@ const { db } = createDb()
 const auth = createAuth(db)
 
 // Original files → R2/S3 (ADR-0007). In dev `S3_ENDPOINT` points at MinIO with
-// path-style routing; in prod it's unset and this hits real R2.
+// path-style routing; in prod it's the R2 endpoint with virtual-host style.
+// R2 always needs an explicit endpoint — it is never left unset.
 const store = createS3Store({
   endpoint: process.env.S3_ENDPOINT,
   region: process.env.S3_REGION ?? "auto",

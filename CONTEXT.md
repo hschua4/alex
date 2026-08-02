@@ -141,14 +141,18 @@ All via the **OpenRouter** provider on one API key. The model picker swaps
 
 ## 8. Deployment
 
-- **VPS + docker-compose**, joining the Skylab external `proxy` (Traefik TLS +
-  routing labels) and `postgres` networks. Own `alex` role + DB via the shared
-  `bootstrap.sh`. Likely `alex.hschua.com`.
+- **VPS + docker-compose** at `alex.hschua.com`, joining the Skylab external
+  `proxy` (Traefik TLS + routing labels) and `postgres` networks. Own `alex`
+  role + DB via the shared `bootstrap.sh` — which also creates the `vector`
+  extension, since pgvector is untrusted and the non-super `alex` role cannot.
 - **Deploy = migrations gate the swap**:
-  `docker compose pull` → `docker compose run --rm app db:migrate` (halts on
-  failure) → `docker compose up -d` with `start-first` + a healthcheck.
+  `docker compose pull` → `docker compose run --rm migrate` (halts on failure)
+  → `docker compose up -d`. The swap is a plain **recreate**, not `start-first`
+  — vanilla Compose has no such strategy, so a few seconds of downtime is
+  accepted, same as Odin. The SIGTERM handler drains pg-boss first.
 - **Dev/prod parity**: dev compose pinned to `pgvector/pgvector:pg16` to match
   the swapped shared prod image (not pg17).
+- Runbook: [docs/DEPLOY.md](./docs/DEPLOY.md).
 
 ## 9. Testing
 

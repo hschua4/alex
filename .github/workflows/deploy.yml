@@ -1,0 +1,103 @@
+# Pull → migrate → swap on the Skylab VPS (DEPLOYMENT.md #4, #7, #8, #22).
+#
+# CI never holds prod secrets (#9) — every value the app needs already lives in
+# /srv/alex/.env on the box. All this workflow does is pin an image tag, gate on
+# migrations, and swap the container.
+#
+# Called by build.yml after a successful image push, and runnable by hand to
+# roll back to any previously pushed SHA:
+#   gh workflow run deploy.yml -f tag=sha-abc1234
+name: deploy
+
+on:
+  workflow_call:
+    inputs:
+      tag:
+        description: Image tag to deploy (e.g. sha-abc1234)
+        type: string
+        required: true
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Image tag to deploy (e.g. sha-abc1234, or latest)
+        type: string
+        required: true
+        default: latest
+
+# Never let two deploys interleave on the same box.
+concurrency:
+  group: deploy-alex
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      # Ephemeral tailnet node for this run; SSH on the VPS is bound to
+      # Tailscale only, with no public :22 (DEPLOYMENT.md #11).
+      - name: Join tailnet
+        uses: tailscale/github-action@v3
+        with:
+          oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
+          oauth-secret: ${{ secrets.TS_OAUTH_SECRET }}
+          tags: tag:ci
+
+      - name: Configure SSH
+        env:
+          SSH_PRIVATE_KEY: ${{ secrets.VPS_SSH_KEY }}
+          SSH_KNOWN_HOSTS: ${{ secrets.VPS_SSH_KNOWN_HOSTS }}
+        run: |
+          install -d -m 700 ~/.ssh
+          printf '%s\n' "$SSH_PRIVATE_KEY" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          # Pin the host key so the deploy fails closed rather than trusting
+          # whatever answers on the tailnet address.
+          printf '%s\n' "$SSH_KNOWN_HOSTS" > ~/.ssh/known_hosts
+          chmod 644 ~/.ssh/known_hosts
+
+      - name: Pull, migrate, swap
+        env:
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+          VPS_USER: ${{ secrets.VPS_USER }}
+          TAG: ${{ inputs.tag }}
+        run: |
+          ssh -o BatchMode=yes "$VPS_USER@$VPS_HOST" TAG="$TAG" 'bash -euo pipefail -s' <<'REMOTE'
+          cd /srv/alex
+
+          # Persist the tag in .env so a later manual `docker compose up -d`
+          # cannot silently drift back to :latest.
+          if grep -q '^ALEX_IMAGE_TAG=' .env; then
+            sed -i "s|^ALEX_IMAGE_TAG=.*|ALEX_IMAGE_TAG=${TAG}|" .env
+          else
+            printf 'ALEX_IMAGE_TAG=%s\n' "${TAG}" >> .env
+          fi
+
+          echo "==> pulling ${TAG}"
+          docker compose pull alex
+
+          # Migration gate: a non-zero exit stops the deploy here, with the old
+          # container still serving. Migrations must be expand/contract so the
+          # running old code tolerates the new schema (DEPLOYMENT.md #7).
+          echo "==> migrating"
+          docker compose run --rm migrate
+
+          # Vanilla Compose has no start-first strategy (DEPLOYMENT.md #8), so
+          # this is a recreate: a few seconds of downtime, same as Odin.
+          echo "==> swapping"
+          docker compose up -d alex
+
+          echo "==> waiting for health"
+          for i in $(seq 1 30); do
+            status=$(docker inspect -f '{{.State.Health.Status}}' alex 2>/dev/null || echo starting)
+            [ "$status" = "healthy" ] && break
+            [ "$i" = "30" ] && { echo "unhealthy after 60s"; docker compose logs --tail=100 alex; exit 1; }
+            sleep 2
+          done
+
+          # Yesterday's image stays for a fast rollback (DEPLOYMENT.md #22).
+          docker image prune -af --filter "until=24h"
+
+          printf '%s\n' "${TAG}" > /srv/alex/CURRENT_SHA
+          echo "==> deployed ${TAG}"
+          REMOTE
