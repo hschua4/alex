@@ -4,6 +4,8 @@
 /* Design fonts — Plus Jakarta Sans (UI) + JetBrains Mono (metadata/code) */
 @import "@fontsource-variable/plus-jakarta-sans";
 @import "@fontsource-variable/jetbrains-mono";
+/* Fraunces (display) — marketing surfaces only; wght + opsz axes. */
+@import "@fontsource-variable/fraunces/standard.css";
 
 @custom-variant dark (&:is(.dark *));
 
@@ -63,6 +65,17 @@
   --sidebar-accent-foreground: oklch(0.5 0.16 264);
   --sidebar-border: oklch(0.915 0.004 264);
   --sidebar-ring: oklch(0.55 0.19 264);
+
+  /*
+    Landing surface (public "/") — a fixed ink-on-paper palette, deliberately
+    theme-independent like the rail. `--mark` is reserved for one thing only:
+    the bracketed citation numerals that are the product's whole idea.
+  */
+  --ink: oklch(0.17 0.014 264);
+  --ink-2: oklch(0.225 0.016 264);
+  --paper: oklch(0.972 0.006 85);
+  --paper-2: oklch(0.938 0.009 80);
+  --mark: oklch(0.79 0.14 72);
 }
 
 .dark {
@@ -158,8 +171,26 @@
   --color-sidebar-border: var(--sidebar-border);
   --color-sidebar-ring: var(--sidebar-ring);
 
+  --color-ink: var(--ink);
+  --color-ink-2: var(--ink-2);
+  --color-paper: var(--paper);
+  --color-paper-2: var(--paper-2);
+  --color-mark: var(--mark);
+
   --font-sans: "Plus Jakarta Sans Variable", system-ui, sans-serif;
   --font-mono: "JetBrains Mono Variable", ui-monospace, monospace;
+  --font-display: "Fraunces Variable", ui-serif, Georgia, serif;
+
+  --animate-ticker: ticker 42s linear infinite;
+}
+
+@keyframes ticker {
+  from {
+    transform: translateX(0);
+  }
+  to {
+    transform: translateX(-50%);
+  }
 }
 
 @layer base {
@@ -167,7 +198,7 @@
     @apply border-border outline-ring/50;
   }
   body {
-    @apply bg-background text-foreground font-sans antialiased;
+    @apply bg-background font-sans text-foreground antialiased;
     letter-spacing: -0.005em;
   }
   ::-webkit-scrollbar {
@@ -183,5 +214,60 @@
   ::-webkit-scrollbar-thumb:hover {
     background: color-mix(in oklch, var(--foreground) 30%, transparent);
     background-clip: padding-box;
+  }
+}
+
+/*
+  Landing-only primitives. Everything here is prefixed `lp-` and used solely by
+  routes/landing.tsx — the app shell never sees it.
+*/
+@layer components {
+  /* Display type: Fraunces with optical sizing, set tight like a masthead. */
+  .lp-display {
+    font-family: var(--font-display);
+    font-optical-sizing: auto;
+    letter-spacing: -0.032em;
+    line-height: 0.92;
+    font-synthesis-weight: none;
+  }
+
+  /* Faint horizontal ruling — the page reads as a sheet of lined paper. */
+  .lp-ruled {
+    background-image: repeating-linear-gradient(
+      to bottom,
+      color-mix(in oklch, currentColor 8%, transparent) 0 1px,
+      transparent 1px 34px
+    );
+  }
+
+  /* Paper tooth. Sits above the background, under all content. */
+  .lp-grain::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    opacity: 0.4;
+    mix-blend-mode: overlay;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='3'/%3E%3C/filter%3E%3Crect width='140' height='140' filter='url(%23n)' opacity='0.35'/%3E%3C/svg%3E");
+  }
+
+  /* Scroll-reveal: hidden until <Reveal> flips data-shown. */
+  .lp-reveal {
+    opacity: 0;
+    transform: translateY(18px);
+    transition:
+      opacity 0.7s cubic-bezier(0.22, 1, 0.36, 1),
+      transform 0.7s cubic-bezier(0.22, 1, 0.36, 1);
+  }
+  .lp-reveal[data-shown="true"] {
+    opacity: 1;
+    transform: none;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .lp-reveal {
+      opacity: 1;
+      transform: none;
+      transition: none;
+    }
   }
 }

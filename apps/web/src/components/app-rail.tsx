@@ -20,7 +20,7 @@ export function AppRail() {
         R
       </div>
 
-      <RailLink to="/" label="Projects" icon={LayoutGrid} end />
+      <RailLink to="/app" label="Projects" icon={LayoutGrid} end />
       <RailButton label="Search" icon={Search} />
 
       <div className="flex-1" />

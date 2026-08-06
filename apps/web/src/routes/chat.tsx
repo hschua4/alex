@@ -67,7 +67,7 @@ export function ChatScreen() {
       </div>
     )
   }
-  if (!project) return <Navigate to="/" replace />
+  if (!project) return <Navigate to="/app" replace />
 
   function toggleDoc(id: string) {
     setSelected((prev) => {

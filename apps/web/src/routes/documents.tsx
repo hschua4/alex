@@ -41,7 +41,7 @@ export function DocumentsScreen() {
   const fileInput = useRef<HTMLInputElement>(null)
 
   if (isPending) return <ProjectLoading />
-  if (!project) return <Navigate to="/" replace />
+  if (!project) return <Navigate to="/app" replace />
 
   const pickFiles = () => fileInput.current?.click()
 

@@ -45,7 +45,7 @@ export function LoginScreen() {
       setError(error.message ?? "Something went wrong. Please try again.")
       return
     }
-    navigate("/", { replace: true })
+    navigate("/app", { replace: true })
   }
 
   function switchMode(next: Mode) {
