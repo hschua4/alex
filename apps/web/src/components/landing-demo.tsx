@@ -92,7 +92,9 @@ type Token = { text: string } | { cite: number }
 
 /** Same prose as the hero card, tokenised so it can stream in behind markers. */
 const ANSWER: Token[] = [
-  { text: "Enterprise pricing is locked to a $2,400 annual floor per workspace" },
+  {
+    text: "Enterprise pricing is locked to a $2,400 annual floor per workspace",
+  },
   { cite: 1 },
   { text: ", with volume discounts capped at 20% on contracts above 50 seats" },
   { cite: 2 },
@@ -247,7 +249,8 @@ const STARTS = SCENES.reduce<number[]>((acc, _s, i) => {
   return acc
 }, [])
 /** The frame shown when motion is suppressed: a settled, fully cited answer. */
-const POSTER = STARTS[SCENES.length - 1] + SCENES[SCENES.length - 1].duration * 0.35
+const POSTER =
+  STARTS[SCENES.length - 1] + SCENES[SCENES.length - 1].duration * 0.35
 
 function sceneAt(t: number) {
   let i = 0
@@ -264,12 +267,7 @@ const ease = (v: number) =>
   v < 0.5 ? 2 * v * v : 1 - Math.pow(-2 * v + 2, 2) / 2
 
 type IngestStage =
-  | "queued"
-  | "uploading"
-  | "extracting"
-  | "chunking"
-  | "embedding"
-  | "indexed"
+  "queued" | "uploading" | "extracting" | "chunking" | "embedding" | "indexed"
 
 const STAGE_LABEL: Record<IngestStage, string> = {
   queued: "Queued",
@@ -282,7 +280,12 @@ const STAGE_LABEL: Record<IngestStage, string> = {
 
 type DemoState = {
   view: "documents" | "chat"
-  ingest: { visible: boolean; progress: number; stage: IngestStage; chunks: number }
+  ingest: {
+    visible: boolean
+    progress: number
+    stage: IngestStage
+    chunks: number
+  }
   selected: string[]
   typed: string
   typing: boolean
@@ -298,7 +301,12 @@ type DemoState = {
 function derive(scene: SceneId, p: number): DemoState {
   const base: DemoState = {
     view: "chat",
-    ingest: { visible: true, progress: 1, stage: "indexed", chunks: UPLOADED.chunks },
+    ingest: {
+      visible: true,
+      progress: 1,
+      stage: "indexed",
+      chunks: UPLOADED.chunks,
+    },
     selected: SCOPED_IDS,
     typed: "",
     typing: false,
@@ -331,7 +339,8 @@ function derive(scene: SceneId, p: number): DemoState {
         ingest: {
           visible: p > 0.08,
           // Upload bar fills first; the rest of the bar tracks the ingest run.
-          progress: stage === "uploading" ? span(p, 0.1, 0.3) : span(p, 0.3, 0.84),
+          progress:
+            stage === "uploading" ? span(p, 0.1, 0.3) : span(p, 0.3, 0.84),
           stage,
           chunks: Math.round(span(p, 0.44, 0.84) * UPLOADED.chunks),
         },
@@ -382,7 +391,8 @@ function derive(scene: SceneId, p: number): DemoState {
         retrieval: { show: false, scanned: SCANNED, kept: 8 },
         panel: "sources",
         provenance: true,
-        activeCite: p < 0.14 ? null : p < 0.5 ? 2 : p < 0.56 ? null : p < 0.9 ? 3 : null,
+        activeCite:
+          p < 0.14 ? null : p < 0.5 ? 2 : p < 0.56 ? null : p < 0.9 ? 3 : null,
       }
   }
 }
@@ -595,7 +605,9 @@ function IngestingRow({
       <div className="flex items-center gap-3">
         <Badge kind={doc.kind} />
         <div className="min-w-0 flex-1">
-          <p className="truncate text-[12.5px] font-semibold text-ink">{doc.name}</p>
+          <p className="truncate text-[12.5px] font-semibold text-ink">
+            {doc.name}
+          </p>
           <p className="mt-px font-mono text-[10.5px] text-ink/45">
             {doc.pages} pages · {doc.size}
             {stage === "embedding" || done ? ` · ${chunks} chunks` : ""}
@@ -633,7 +645,9 @@ function DocRow({ doc }: { doc: DemoDoc }) {
     <div className="flex items-center gap-3 border-b border-ink/8 px-4 py-3 last:border-b-0">
       <Badge kind={doc.kind} />
       <div className="min-w-0 flex-1">
-        <p className="truncate text-[12.5px] font-semibold text-ink">{doc.name}</p>
+        <p className="truncate text-[12.5px] font-semibold text-ink">
+          {doc.name}
+        </p>
         <p className="mt-px font-mono text-[10.5px] text-ink/45">
           {doc.pages} pages · {doc.size} · {doc.chunks} chunks
         </p>
@@ -744,11 +758,7 @@ function RetrievalReadout({
               key={i}
               className={cn(
                 "h-3.5 w-[3px] rounded-full transition-colors duration-200",
-                kept
-                  ? "bg-lp-accent"
-                  : reached
-                    ? "bg-ink/20"
-                    : "bg-ink/[0.07]"
+                kept ? "bg-lp-accent" : reached ? "bg-ink/20" : "bg-ink/[0.07]"
               )}
             />
           )
@@ -820,10 +830,8 @@ function Marker({ n, active }: { n: number; active: boolean }) {
       className={cn(
         // Left margin only: a marker follows a word but is often followed by
         // punctuation, which should sit tight against it.
-        "ml-0.5 inline-flex translate-y-[-1px] animate-in items-center rounded-[5px] px-1 py-px align-baseline font-mono text-[10px] font-semibold duration-300 fade-in zoom-in-50",
-        active
-          ? "bg-mark text-ink"
-          : "bg-mark/20 text-[oklch(0.52_0.13_72)]"
+        "ml-0.5 inline-flex translate-y-[-1px] animate-in items-center rounded-[5px] px-1 py-px align-baseline font-mono text-[10px] font-semibold duration-300 zoom-in-50 fade-in",
+        active ? "bg-mark text-ink" : "bg-mark/20 text-[oklch(0.52_0.13_72)]"
       )}
     >
       [{n}]
@@ -965,7 +973,9 @@ function SidePanel({ state }: { state: DemoState }) {
                   <span
                     className={cn(
                       "flex size-[17px] shrink-0 items-center justify-center rounded-[5px] font-mono text-[10px] font-bold transition-colors",
-                      active ? "bg-mark text-ink" : "bg-mark/20 text-[oklch(0.52_0.13_72)]"
+                      active
+                        ? "bg-mark text-ink"
+                        : "bg-mark/20 text-[oklch(0.52_0.13_72)]"
                     )}
                   >
                     {source.n}
@@ -993,9 +1003,7 @@ function SidePanel({ state }: { state: DemoState }) {
 
 /** Reveal offset at which marker `n` has finished streaming in. */
 function markerEnd(n: number) {
-  const placed = PLACED.find(
-    ({ token }) => "cite" in token && token.cite === n
-  )
+  const placed = PLACED.find(({ token }) => "cite" in token && token.cite === n)
   return placed ? placed.end : Infinity
 }
 
@@ -1024,12 +1032,20 @@ function Rail({ active }: { active: "documents" | "chat" }) {
   )
 }
 
-function Badge({ kind, size = "md" }: { kind: "pdf" | "docx"; size?: "sm" | "md" }) {
+function Badge({
+  kind,
+  size = "md",
+}: {
+  kind: "pdf" | "docx"
+  size?: "sm" | "md"
+}) {
   return (
     <span
       className={cn(
         "flex shrink-0 items-center justify-center rounded-[5px] font-mono font-bold tracking-tight text-white",
-        kind === "pdf" ? "bg-[oklch(0.55_0.17_25)]" : "bg-[oklch(0.5_0.13_250)]",
+        kind === "pdf"
+          ? "bg-[oklch(0.55_0.17_25)]"
+          : "bg-[oklch(0.5_0.13_250)]",
         size === "sm" ? "h-3.5 w-6 text-[7px]" : "h-7 w-7 text-[8px]"
       )}
     >
@@ -1184,7 +1200,12 @@ function Transport({
                 <span
                   className="block h-full rounded-full bg-mark"
                   style={{
-                    width: i < index ? "100%" : i === index ? `${local * 100}%` : "0%",
+                    width:
+                      i < index
+                        ? "100%"
+                        : i === index
+                          ? `${local * 100}%`
+                          : "0%",
                   }}
                 />
               </span>

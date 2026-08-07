@@ -48,8 +48,7 @@ export function WordmarkGlyph({
         className
       )}
     >
-      <span className={bracketClassName}>[</span>
-      a
+      <span className={bracketClassName}>[</span>a
       <span className={bracketClassName}>]</span>
     </span>
   )

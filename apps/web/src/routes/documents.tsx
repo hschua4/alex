@@ -96,7 +96,11 @@ export function DocumentsScreen() {
         />
 
         <div className="flex-1 overflow-y-auto px-8 py-7">
-          <Dropzone onPick={pickFiles} onFiles={onFiles} busy={upload.isPending} />
+          <Dropzone
+            onPick={pickFiles}
+            onFiles={onFiles}
+            busy={upload.isPending}
+          />
           {documents.isPending ? (
             <TableSkeleton />
           ) : documents.isError ? (
@@ -175,7 +179,7 @@ function DocumentsTable({
     <div className="overflow-hidden rounded-[14px] border bg-card">
       <div
         className={cn(
-          "grid items-center gap-0 bg-secondary px-5 py-3 text-[11.5px] font-semibold uppercase tracking-wider text-muted-foreground",
+          "grid items-center gap-0 bg-secondary px-5 py-3 text-[11.5px] font-semibold tracking-wider text-muted-foreground uppercase",
           GRID
         )}
       >
@@ -285,7 +289,10 @@ function TableSkeleton() {
       {Array.from({ length: 4 }).map((_, i) => (
         <div
           key={i}
-          className={cn("grid items-center border-t px-5 py-4 first:border-t-0", GRID)}
+          className={cn(
+            "grid items-center border-t px-5 py-4 first:border-t-0",
+            GRID
+          )}
         >
           <div className="size-8 animate-pulse rounded-lg bg-muted" />
           <div className="h-4 w-2/3 animate-pulse rounded bg-muted" />

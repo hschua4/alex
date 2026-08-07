@@ -17,7 +17,7 @@ export function ProjectSidebarHeader({ project }: { project: Project }) {
     <>
       <Link
         to="/app"
-        className="flex items-center gap-2 px-5 pb-3.5 pt-[18px] text-[13px] font-medium text-muted-foreground transition-colors hover:text-foreground"
+        className="flex items-center gap-2 px-5 pt-[18px] pb-3.5 text-[13px] font-medium text-muted-foreground transition-colors hover:text-foreground"
       >
         <ChevronLeft className="size-[15px]" strokeWidth={2.2} />
         All projects

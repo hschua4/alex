@@ -116,7 +116,7 @@ export function useUploadDocument(projectId: string) {
           .then((b: { error?: string }) => b.error)
           .catch(() => undefined)
         throw new Error(
-          (code && UPLOAD_ERRORS[code]) ?? "Upload failed. Please try again.",
+          (code && UPLOAD_ERRORS[code]) ?? "Upload failed. Please try again."
         )
       }
     },
@@ -133,9 +133,9 @@ export function useReingestDocument(projectId: string) {
   const queryClient = useQueryClient()
   return useMutation({
     mutationFn: async (id: string): Promise<void> => {
-      const res = await api.projects[":projectId"].documents[":id"].reingest.$post(
-        { param: { projectId, id } },
-      )
+      const res = await api.projects[":projectId"].documents[
+        ":id"
+      ].reingest.$post({ param: { projectId, id } })
       if (!res.ok) throw new Error("Failed to re-ingest document")
     },
     onSuccess: () => {

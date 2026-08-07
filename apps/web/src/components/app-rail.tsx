@@ -47,7 +47,7 @@ function RailUser() {
       <DropdownMenuTrigger
         title={user?.email ?? "Account"}
         aria-label={user ? `Signed in as ${user.email}` : "Account"}
-        className="mt-1 flex size-[34px] items-center justify-center rounded-full text-[13px] font-bold text-white outline-none focus-visible:ring-2 focus-visible:ring-white/60 [background:oklch(0.62_0.13_45)]"
+        className="mt-1 flex size-[34px] items-center justify-center rounded-full text-[13px] font-bold text-white outline-none [background:oklch(0.62_0.13_45)] focus-visible:ring-2 focus-visible:ring-white/60"
       >
         {initials(user?.name, user?.email)}
       </DropdownMenuTrigger>
@@ -83,11 +83,7 @@ function initials(name?: string, email?: string): string {
 function RailHealthDot() {
   const { data, isLoading, isError } = useHealth()
   const ok = data?.status === "ok"
-  const state = isLoading
-    ? "pending"
-    : isError || !ok
-      ? "down"
-      : "up"
+  const state = isLoading ? "pending" : isError || !ok ? "down" : "up"
   const color =
     state === "up"
       ? "var(--success)"
@@ -102,12 +98,7 @@ function RailHealthDot() {
         : "Checking API…"
 
   return (
-    <div
-      className={itemBase}
-      title={title}
-      aria-label={title}
-      role="status"
-    >
+    <div className={itemBase} title={title} aria-label={title} role="status">
       <span
         className="size-2.5 rounded-full transition-colors"
         style={{ background: color }}

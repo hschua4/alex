@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react"
+import { useCallback, useEffect, useRef, useState } from "react"
 import {
   ArrowUp,
   Check,
@@ -7,10 +7,16 @@ import {
   Loader2,
   Plus,
   RefreshCw,
+  Sparkles,
   Square,
 } from "lucide-react"
 import { Link, Navigate, useNavigate, useParams } from "react-router-dom"
 
+import {
+  CitationHighlightProvider,
+  CitationScope,
+  SourceList,
+} from "@/components/citations"
 import { DocBadge } from "@/components/doc-badge"
 import { Markdown } from "@/components/markdown"
 import { ProjectSidebarHeader } from "@/components/project-sidebar-header"
@@ -28,10 +34,10 @@ import {
   useAnswerModel,
   useChatStream,
   useMessages,
+  useModels,
   useSessions,
   type ChatMessage,
   type ChatSession,
-  type Citation,
 } from "@/lib/chat"
 import { useDocuments, type Document } from "@/lib/documents"
 import { useProject, type Project } from "@/lib/projects"
@@ -50,13 +56,23 @@ export function ChatScreen() {
 
   const [tab, setTab] = useState<"documents" | "sources">("documents")
 
+  // Clicking a `[n]` marker opens the sources panel on *that* answer — which is
+  // usually, but not always, the latest one.
+  const [focusedAnswerId, setFocusedAnswerId] = useState<string | null>(null)
+  const openSource = useCallback((messageId: string) => {
+    setFocusedAnswerId(messageId)
+    setTab("sources")
+  }, [])
+
   // Default the selection to every indexed document, once, when they first load.
   const [selected, setSelected] = useState<Set<string> | null>(null)
   const initialized = useRef(false)
   useEffect(() => {
     if (initialized.current || documents.length === 0) return
     initialized.current = true
-    setSelected(new Set(documents.filter((d) => d.status === "indexed").map((d) => d.id)))
+    setSelected(
+      new Set(documents.filter((d) => d.status === "indexed").map((d) => d.id))
+    )
   }, [documents])
   const selectedIds = selected ?? new Set<string>()
 
@@ -88,114 +104,113 @@ export function ChatScreen() {
   // its replacement takes its place in view. Hide any answer another one points at,
   // plus the one currently being regenerated as its fresh answer streams in.
   const superseded = new Set(
-    messages.map((m) => m.regeneratedFrom).filter((id): id is string => !!id),
+    messages.map((m) => m.regeneratedFrom).filter((id): id is string => !!id)
   )
-  if (pendingTurn?.regeneratingFrom) superseded.add(pendingTurn.regeneratingFrom)
+  if (pendingTurn?.regeneratingFrom)
+    superseded.add(pendingTurn.regeneratingFrom)
   const visibleMessages = messages.filter((m) => !superseded.has(m.id))
 
   // The newest assistant answer can be regenerated (only when idle).
-  const lastAssistantId = [...visibleMessages]
+  const lastAssistant = [...visibleMessages]
     .reverse()
-    .find((m) => m.role === "assistant")?.id
+    .find((m) => m.role === "assistant")
 
-  // Sources panel shows the passages cited by the latest answer.
-  const latestSources = latestCitations(visibleMessages)
+  // The panel shows the answer whose citation was last opened, and the latest
+  // answer until then (or again, once that one is superseded by a regenerate).
+  const panelAnswer =
+    visibleMessages.find((m) => m.id === focusedAnswerId) ?? lastAssistant
 
   return (
-    <div className="flex flex-1 overflow-hidden">
-      <ChatHistorySidebar
-        project={project}
-        projectId={projectId}
-        sessions={sessions}
-        activeChatId={chatId}
-      />
+    /* Above both columns: a marker in the transcript lights its row in the panel. */
+    <CitationHighlightProvider onSelect={openSource}>
+      <div className="flex flex-1 overflow-hidden">
+        <ChatHistorySidebar
+          project={project}
+          projectId={projectId}
+          sessions={sessions}
+          activeChatId={chatId}
+        />
 
-      {/* center column */}
-      <div className="flex flex-1 flex-col overflow-hidden bg-secondary">
-        <header className="flex h-16 shrink-0 items-center gap-3 border-b bg-card px-7">
-          <h1 className="truncate text-base font-bold tracking-tight">
-            {activeSession?.title ?? "New chat"}
-          </h1>
-          <span className="flex h-7 shrink-0 items-center gap-1.5 rounded-full bg-accent px-2.5 text-[12.5px] font-semibold text-accent-foreground">
-            <FileText className="size-[13px]" strokeWidth={2.2} />
-            {selectedCount} {selectedCount === 1 ? "document" : "documents"} in
-            context
-          </span>
-        </header>
+        {/* center column */}
+        <div className="flex flex-1 flex-col overflow-hidden bg-secondary">
+          {/* Session chrome — the same strip the landing hero opens with. */}
+          <header className="flex h-14 shrink-0 items-center gap-2.5 border-b bg-card px-7 font-mono text-[10.5px] tracking-[0.08em] text-muted-foreground uppercase">
+            <span className="size-1.5 shrink-0 rounded-full bg-citation" />
+            <h1 className="truncate">{activeSession?.title ?? "New chat"}</h1>
+            <span className="shrink-0 opacity-40">/</span>
+            <span className="shrink-0 normal-case">
+              {selectedCount} of {documents.length}{" "}
+              {documents.length === 1 ? "document" : "documents"} selected
+            </span>
+          </header>
 
-        <div className="flex-1 overflow-y-auto py-8">
-          <div className="mx-auto flex max-w-[720px] flex-col gap-[30px] px-4">
-            {visibleMessages.length === 0 && !pendingTurn && (
-              <EmptyState hasDocuments={documents.some((d) => d.status === "indexed")} />
-            )}
-            {visibleMessages.map((message) => (
-              <MessageBubble
-                key={message.id}
-                message={message}
-                onOpenSources={() => setTab("sources")}
-                canRegenerate={
-                  message.id === lastAssistantId && !isStreaming && !!chatId
-                }
-                onRegenerate={() =>
-                  chatId &&
-                  regenerate({
-                    messageId: message.id,
-                    model: answerModel.model,
-                    sessionId: chatId,
-                  })
-                }
-              />
-            ))}
-            {pendingTurn && (
-              <>
-                {pendingTurn.userContent !== undefined && (
-                  <UserBubble text={pendingTurn.userContent} />
-                )}
-                <AssistantStreaming
-                  text={pendingTurn.assistantText}
-                  error={pendingTurn.error}
+          <div className="flex-1 overflow-y-auto py-8">
+            <div className="mx-auto flex max-w-[720px] flex-col gap-[30px] px-4">
+              {visibleMessages.length === 0 && !pendingTurn && (
+                <EmptyState
+                  hasDocuments={documents.some((d) => d.status === "indexed")}
                 />
-              </>
-            )}
+              )}
+              {visibleMessages.map((message) => (
+                <MessageBubble
+                  key={message.id}
+                  message={message}
+                  canRegenerate={
+                    message.id === lastAssistant?.id && !isStreaming && !!chatId
+                  }
+                  onRegenerate={() =>
+                    chatId &&
+                    regenerate({
+                      messageId: message.id,
+                      model: answerModel.model,
+                      sessionId: chatId,
+                    })
+                  }
+                />
+              ))}
+              {pendingTurn && (
+                <>
+                  {pendingTurn.userContent !== undefined && (
+                    <UserBubble text={pendingTurn.userContent} />
+                  )}
+                  <AssistantStreaming
+                    text={pendingTurn.assistantText}
+                    error={pendingTurn.error}
+                  />
+                </>
+              )}
+            </div>
           </div>
+
+          <Composer
+            documents={documents}
+            selectedIds={selectedIds}
+            model={answerModel}
+            streaming={isStreaming}
+            onStop={stop}
+            onSend={(content) =>
+              send({
+                content,
+                model: answerModel.model,
+                selectedDocumentIds: [...selectedIds],
+                sessionId: chatId,
+              })
+            }
+          />
         </div>
 
-        <Composer
+        <SidePanel
+          tab={tab}
+          onTabChange={setTab}
           documents={documents}
-          selectedIds={selectedIds}
-          model={answerModel}
-          streaming={isStreaming}
-          onStop={stop}
-          onSend={(content) =>
-            send({
-              content,
-              model: answerModel.model,
-              selectedDocumentIds: [...selectedIds],
-              sessionId: chatId,
-            })
-          }
+          selected={selectedIds}
+          onToggleDoc={toggleDoc}
+          answer={panelAnswer}
+          isLatestAnswer={panelAnswer?.id === lastAssistant?.id}
         />
       </div>
-
-      <SidePanel
-        tab={tab}
-        onTabChange={setTab}
-        documents={documents}
-        selected={selectedIds}
-        onToggleDoc={toggleDoc}
-        sources={latestSources}
-      />
-    </div>
+    </CitationHighlightProvider>
   )
-}
-
-/** Citations of the most recent assistant message (the "latest answer"). */
-function latestCitations(messages: ChatMessage[]): Citation[] {
-  for (let i = messages.length - 1; i >= 0; i--) {
-    const m = messages[i]
-    if (m.role === "assistant") return m.citations
-  }
-  return []
 }
 
 // ── left: chat history ──────────────────────────────────────────────────────
@@ -227,7 +242,7 @@ function ChatHistorySidebar({
         </Button>
       </div>
 
-      <p className="px-4 py-1.5 text-[11.5px] font-semibold uppercase tracking-wider text-muted-foreground">
+      <p className="px-4 py-1.5 text-[11.5px] font-semibold tracking-wider text-muted-foreground uppercase">
         Recent
       </p>
       <div className="flex flex-1 flex-col gap-0.5 overflow-y-auto px-3 pb-4">
@@ -273,113 +288,119 @@ function ChatHistorySidebar({
 function UserBubble({ text }: { text: string }) {
   return (
     <div className="flex justify-end">
-      <div className="max-w-[78%] whitespace-pre-wrap rounded-[16px] rounded-br-[4px] bg-primary px-[17px] py-3 text-[14.5px] leading-relaxed text-primary-foreground">
+      <div className="max-w-[78%] rounded-2xl rounded-br-sm bg-foreground px-[17px] py-3 text-[14.5px] leading-snug whitespace-pre-wrap text-background">
         {text}
       </div>
     </div>
   )
 }
 
-function AssistantAvatar() {
-  return (
-    <div className="flex size-8 shrink-0 items-center justify-center rounded-[9px] bg-rail text-[13px] font-extrabold text-white">
-      A
-    </div>
-  )
-}
-
-function AssistantStreaming({
-  text,
-  error,
-}: {
-  text: string
-  error?: string
-}) {
-  return (
-    <div className="flex gap-3.5">
-      <AssistantAvatar />
-      <div className="min-w-0 flex-1">
-        {error ? (
-          <p className="text-[14.5px] leading-[1.65] text-destructive">{error}</p>
-        ) : text ? (
-          <div>
-            <Markdown>{text}</Markdown>
-            <span className="ml-0.5 inline-block h-4 w-[2px] translate-y-0.5 animate-pulse bg-primary align-middle" />
-          </div>
-        ) : (
-          <div className="flex items-center gap-2 text-muted-foreground">
-            <Loader2 className="size-4 animate-spin" />
-            <span className="text-[13.5px]">Searching your documents…</span>
-          </div>
-        )}
+function AssistantStreaming({ text, error }: { text: string; error?: string }) {
+  if (error) {
+    return (
+      <p className="text-[14.5px] leading-[1.75] text-destructive">{error}</p>
+    )
+  }
+  if (!text) {
+    return (
+      <div className="flex items-center gap-2 text-muted-foreground">
+        <Loader2 className="size-4 animate-spin" />
+        <span className="text-[13.5px]">Searching your documents…</span>
       </div>
+    )
+  }
+  return (
+    <div>
+      <Markdown>{text}</Markdown>
+      <span className="ml-0.5 inline-block h-4 w-[2px] translate-y-0.5 animate-pulse bg-foreground align-middle" />
     </div>
   )
 }
 
+/**
+ * One answer: prose with live `[n]` chips, then the provenance strip. The
+ * passages themselves live in the side panel, which the scope links the markers
+ * to — hovering one lights its row there, clicking opens it.
+ */
 function MessageBubble({
   message,
-  onOpenSources,
   canRegenerate,
   onRegenerate,
 }: {
   message: ChatMessage
-  onOpenSources: () => void
   canRegenerate: boolean
   onRegenerate: () => void
 }) {
   if (message.role === "user") return <UserBubble text={message.content} />
 
   return (
-    <div className="flex gap-3.5">
-      <AssistantAvatar />
-      <div className="min-w-0 flex-1">
-        <Markdown onCitationClick={onOpenSources}>{message.content}</Markdown>
+    <CitationScope id={message.id}>
+      <div className="min-w-0">
+        <Markdown>{message.content}</Markdown>
         {message.status === "stopped" && (
-          <p className="mt-2 text-xs italic text-muted-foreground">
+          <p className="mt-2 text-xs text-muted-foreground italic">
             Generation stopped.
           </p>
         )}
-        {canRegenerate && (
-          <button
-            type="button"
-            onClick={onRegenerate}
-            className="mt-2.5 inline-flex items-center gap-1.5 rounded-lg border bg-card px-2.5 py-1 text-xs font-medium text-muted-foreground transition-colors hover:border-primary hover:text-primary"
-          >
-            <RefreshCw className="size-3" strokeWidth={2.2} />
-            Regenerate
-          </button>
-        )}
-        {message.citations.length > 0 && (
-          <div className="mt-3.5 flex flex-wrap items-center gap-2">
-            <span className="text-xs font-semibold text-muted-foreground">
-              Sources
-            </span>
-            {message.citations.map((cite) => (
-              <button
-                key={cite.n}
-                type="button"
-                onClick={onOpenSources}
-                className="inline-flex h-[26px] max-w-[230px] items-center gap-1.5 rounded-lg border bg-card px-2.5 text-xs transition-colors hover:border-citation"
-              >
-                <CitationNumber n={cite.n} />
-                <span className="truncate font-medium text-foreground/75">
-                  {shortDocName(cite.documentName)}
-                </span>
-              </button>
-            ))}
-          </div>
-        )}
+        <ProvenanceStrip
+          modelId={message.modelId}
+          cited={message.citations.length}
+          canRegenerate={canRegenerate}
+          onRegenerate={onRegenerate}
+        />
       </div>
-    </div>
+    </CitationScope>
   )
 }
 
-function CitationNumber({ n }: { n: number }) {
+/**
+ * What produced this answer — recorded per turn (ADR-0010), never derived from
+ * the current picker. "Passages retrieved" isn't persisted, so the strip counts
+ * only what was actually cited.
+ */
+function ProvenanceStrip({
+  modelId,
+  cited,
+  canRegenerate,
+  onRegenerate,
+}: {
+  modelId: string | null
+  cited: number
+  canRegenerate: boolean
+  onRegenerate: () => void
+}) {
+  const { data } = useModels()
+  const label = data?.models.find((m) => m.id === modelId)?.label ?? modelId
+
+  if (!label && !canRegenerate) return null
+
   return (
-    <span className="flex size-4 shrink-0 items-center justify-center rounded-[5px] bg-citation-subtle text-[10px] font-bold text-citation">
-      {n}
-    </span>
+    <div className="mt-3.5 flex flex-wrap items-center gap-x-3 gap-y-1.5 border-t border-border/70 pt-2.5 font-mono text-[10.5px] text-muted-foreground">
+      {label && (
+        <span className="flex items-center gap-1.5">
+          <Sparkles className="size-3 opacity-70" />
+          {label}
+        </span>
+      )}
+      {cited > 0 && (
+        <>
+          <span className="opacity-40">·</span>
+          <span>
+            {cited} {cited === 1 ? "source" : "sources"} cited
+          </span>
+        </>
+      )}
+      {canRegenerate && (
+        <button
+          type="button"
+          onClick={onRegenerate}
+          className="ml-auto inline-flex items-center gap-1.5 rounded-md px-1.5 py-0.5 transition-colors hover:bg-foreground/5 hover:text-foreground"
+        >
+          <RefreshCw className="size-3" strokeWidth={2.2} />
+          Regenerate
+        </button>
+      )}
+    </div>
   )
 }
 
@@ -435,7 +456,9 @@ function Composer({
       <div className="mx-auto max-w-[720px] px-4">
         <div className="mb-2.5 flex flex-wrap items-center gap-1.5 px-1">
           <span className="text-xs font-medium text-muted-foreground">
-            {selectedDocs.length > 0 ? "Chatting with" : "Select documents to chat with"}
+            {selectedDocs.length > 0
+              ? "Chatting with"
+              : "Select documents to chat with"}
           </span>
           {selectedDocs.map((doc) => (
             <span
@@ -472,7 +495,10 @@ function Composer({
                     className="h-[30px] rounded-lg text-[12.5px] text-muted-foreground"
                   >
                     {activeLabel}
-                    <ChevronDown data-icon="inline-end" className="opacity-70" />
+                    <ChevronDown
+                      data-icon="inline-end"
+                      className="opacity-70"
+                    />
                   </Button>
                 }
               />
@@ -526,15 +552,19 @@ function SidePanel({
   documents,
   selected,
   onToggleDoc,
-  sources,
+  answer,
+  isLatestAnswer,
 }: {
   tab: "documents" | "sources"
   onTabChange: (t: "documents" | "sources") => void
   documents: Document[]
   selected: Set<string>
   onToggleDoc: (id: string) => void
-  sources: Citation[]
+  /** The answer the panel mirrors: its scope is shared with the transcript. */
+  answer: ChatMessage | undefined
+  isLatestAnswer: boolean
 }) {
+  const sources = answer?.citations ?? []
   return (
     <aside className="flex w-[328px] shrink-0 flex-col border-l bg-card">
       <Tabs
@@ -555,7 +585,7 @@ function SidePanel({
           value="documents"
           className="flex flex-1 flex-col overflow-hidden"
         >
-          <p className="px-4 pb-2 pt-3.5 text-xs text-muted-foreground">
+          <p className="px-4 pt-3.5 pb-2 text-xs text-muted-foreground">
             Select which documents to include in this chat's context. Only
             indexed documents can be searched.
           </p>
@@ -576,7 +606,9 @@ function SidePanel({
                   onClick={() => onToggleDoc(doc.id)}
                   className={cn(
                     "flex w-full items-center gap-3 rounded-[10px] p-2.5 text-left transition-colors",
-                    indexed ? "hover:bg-secondary" : "cursor-not-allowed opacity-60"
+                    indexed
+                      ? "hover:bg-secondary"
+                      : "cursor-not-allowed opacity-60"
                   )}
                 >
                   <Checkbox
@@ -608,35 +640,20 @@ function SidePanel({
           value="sources"
           className="flex flex-1 flex-col overflow-hidden"
         >
-          <p className="px-4 pb-2 pt-3.5 text-xs text-muted-foreground">
-            Passages retrieved for the latest answer.
+          <p className="px-4 pt-3.5 pb-2 font-mono text-[10.5px] tracking-[0.14em] text-muted-foreground uppercase">
+            {isLatestAnswer ? "Latest answer" : "Earlier answer"}
           </p>
-          <div className="flex flex-1 flex-col gap-3 overflow-y-auto px-4 pb-4">
-            {sources.length === 0 && (
+          <div className="flex-1 overflow-y-auto px-3 pb-4">
+            {sources.length === 0 || !answer ? (
               <p className="px-1 py-2 text-[13px] text-muted-foreground">
-                Sources for the latest answer will appear here.
+                Sources for an answer appear here — ask a question, or click a
+                citation to open the passages behind it.
               </p>
+            ) : (
+              <CitationScope id={answer.id}>
+                <SourceList sources={sources} />
+              </CitationScope>
             )}
-            {sources.map((source) => (
-              <div key={source.n} className="overflow-hidden rounded-xl border">
-                <div className="flex items-center gap-2.5 border-b bg-secondary px-3 py-2.5">
-                  <span className="flex size-5 shrink-0 items-center justify-center rounded-md bg-citation text-[11px] font-bold text-citation-foreground">
-                    {source.n}
-                  </span>
-                  <div className="min-w-0 flex-1">
-                    <p className="truncate text-[12.5px] font-semibold">
-                      {source.documentName}
-                    </p>
-                    <p className="font-mono text-[11px] text-muted-foreground">
-                      p. {source.page} · chunk {source.chunkIndex}
-                    </p>
-                  </div>
-                </div>
-                <p className="border-l-[3px] border-border px-3 py-2.5 text-[12.5px] leading-relaxed text-foreground/70">
-                  {source.snippet}
-                </p>
-              </div>
-            ))}
           </div>
         </TabsContent>
       </Tabs>

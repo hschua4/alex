@@ -112,7 +112,7 @@ function ProjectCard({ project }: { project: Project }) {
       </div>
 
       <div>
-        <h3 className="mb-1.5 text-[16.5px] font-bold leading-tight tracking-tight">
+        <h3 className="mb-1.5 text-[16.5px] leading-tight font-bold tracking-tight">
           {project.name}
         </h3>
         <p className="text-[13px] leading-relaxed text-muted-foreground">

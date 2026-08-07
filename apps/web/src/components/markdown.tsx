@@ -2,67 +2,61 @@ import { Children, memo, type ReactNode } from "react"
 import ReactMarkdown, { type Components } from "react-markdown"
 import remarkGfm from "remark-gfm"
 
+import { CitationMarker } from "@/components/citations"
 import { cn } from "@/lib/utils"
 
 /**
  * Renders assistant markdown (GFM) while preserving the "[n]" citation markers
- * as clickable superscripts. Citations are the app's own convention layered on
- * top of the model's markdown, so we post-process text nodes rather than teach
- * the markdown parser about them.
+ * as live, source-linked chips. Citations are the app's own convention layered
+ * on top of the model's markdown, so we post-process text nodes rather than
+ * teach the markdown parser about them. Marker behaviour (which source it lights)
+ * comes from the surrounding `CitationScope`, so this stays memoised while the
+ * highlight moves.
  */
 export const Markdown = memo(function Markdown({
   children,
-  onCitationClick,
   className,
 }: {
   children: string
-  onCitationClick?: () => void
   className?: string
 }) {
   return (
     <div
       className={cn(
-        "text-[14.5px] leading-[1.65] text-foreground/90",
+        "text-[14.5px] leading-[1.75] text-foreground/90",
         // spacing between block elements; first/last trimmed so bubbles hug tight
         "[&>*]:my-3 [&>:first-child]:mt-0 [&>:last-child]:mb-0",
-        className,
+        className
       )}
     >
-      <ReactMarkdown remarkPlugins={[remarkGfm]} components={buildComponents(onCitationClick)}>
+      <ReactMarkdown remarkPlugins={[remarkGfm]} components={COMPONENTS}>
         {children}
       </ReactMarkdown>
     </div>
   )
 })
 
-/** Split string nodes on "[n]" markers, rendering each marker as a superscript. */
-function withCitations(children: ReactNode, onClick?: () => void): ReactNode {
+/** Split string nodes on "[n]" markers, rendering each marker as a chip. */
+function withCitations(children: ReactNode): ReactNode {
   return Children.map(children, (child) => {
     if (typeof child !== "string") return child
     const parts = child.split(/(\[\d+\])/g)
     return parts.map((part, i) => {
       const match = /^\[(\d+)\]$/.exec(part)
       if (!match) return part
-      return (
-        <button
-          key={i}
-          type="button"
-          onClick={onClick}
-          className="mx-0.5 -translate-y-1 align-super text-[10px] font-bold text-citation hover:underline"
-        >
-          [{match[1]}]
-        </button>
-      )
+      return <CitationMarker key={i} n={Number(match[1])} />
     })
   })
 }
 
-function buildComponents(onCitationClick?: () => void): Components {
-  const cite = (children: ReactNode) => withCitations(children, onCitationClick)
+function buildComponents(): Components {
+  const cite = (children: ReactNode) => withCitations(children)
 
   return {
     p: ({ children }) => <p>{cite(children)}</p>,
-    strong: ({ children }) => <strong className="font-semibold">{cite(children)}</strong>,
+    strong: ({ children }) => (
+      <strong className="font-semibold">{cite(children)}</strong>
+    ),
     em: ({ children }) => <em className="italic">{cite(children)}</em>,
     a: ({ children, href }) => (
       <a
@@ -74,20 +68,32 @@ function buildComponents(onCitationClick?: () => void): Components {
         {cite(children)}
       </a>
     ),
-    ul: ({ children }) => <ul className="list-disc space-y-1 pl-5">{children}</ul>,
-    ol: ({ children }) => <ol className="list-decimal space-y-1 pl-5">{children}</ol>,
+    ul: ({ children }) => (
+      <ul className="list-disc space-y-1 pl-5">{children}</ul>
+    ),
+    ol: ({ children }) => (
+      <ol className="list-decimal space-y-1 pl-5">{children}</ol>
+    ),
     li: ({ children }) => <li className="pl-0.5">{cite(children)}</li>,
     h1: ({ children }) => (
-      <h1 className="text-[19px] font-bold tracking-tight text-foreground">{cite(children)}</h1>
+      <h1 className="text-[19px] font-bold tracking-tight text-foreground">
+        {cite(children)}
+      </h1>
     ),
     h2: ({ children }) => (
-      <h2 className="text-[17px] font-bold tracking-tight text-foreground">{cite(children)}</h2>
+      <h2 className="text-[17px] font-bold tracking-tight text-foreground">
+        {cite(children)}
+      </h2>
     ),
     h3: ({ children }) => (
-      <h3 className="text-[15px] font-semibold text-foreground">{cite(children)}</h3>
+      <h3 className="text-[15px] font-semibold text-foreground">
+        {cite(children)}
+      </h3>
     ),
     h4: ({ children }) => (
-      <h4 className="text-[14.5px] font-semibold text-foreground">{cite(children)}</h4>
+      <h4 className="text-[14.5px] font-semibold text-foreground">
+        {cite(children)}
+      </h4>
     ),
     blockquote: ({ children }) => (
       <blockquote className="border-l-[3px] border-border pl-3.5 text-foreground/70">
@@ -101,7 +107,9 @@ function buildComponents(onCitationClick?: () => void): Components {
       const isBlock = /language-/.test(className ?? "")
       if (isBlock) {
         return (
-          <code className={cn("font-mono text-[13px]", className)}>{children}</code>
+          <code className={cn("font-mono text-[13px]", className)}>
+            {children}
+          </code>
         )
       }
       return (
@@ -117,10 +125,14 @@ function buildComponents(onCitationClick?: () => void): Components {
     ),
     table: ({ children }) => (
       <div className="overflow-x-auto">
-        <table className="w-full border-collapse text-[13.5px]">{children}</table>
+        <table className="w-full border-collapse text-[13.5px]">
+          {children}
+        </table>
       </div>
     ),
-    thead: ({ children }) => <thead className="border-b border-border">{children}</thead>,
+    thead: ({ children }) => (
+      <thead className="border-b border-border">{children}</thead>
+    ),
     th: ({ children }) => (
       <th className="px-3 py-1.5 text-left font-semibold">{cite(children)}</th>
     ),
@@ -129,3 +141,5 @@ function buildComponents(onCitationClick?: () => void): Components {
     ),
   }
 }
+
+const COMPONENTS = buildComponents()

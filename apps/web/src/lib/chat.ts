@@ -43,11 +43,11 @@ export function useModels() {
 export function useAnswerModel() {
   const { data } = useModels()
   const [picked, setPicked] = useState<string | null>(() =>
-    localStorage.getItem(MODEL_STORAGE_KEY),
+    localStorage.getItem(MODEL_STORAGE_KEY)
   )
   const models = data?.models ?? []
   const ids = models.map((m) => m.id)
-  const model = picked && ids.includes(picked) ? picked : data?.default ?? ""
+  const model = picked && ids.includes(picked) ? picked : (data?.default ?? "")
   const pick = useCallback((id: string) => {
     setPicked(id)
     localStorage.setItem(MODEL_STORAGE_KEY, id)
@@ -88,7 +88,11 @@ function formatRelative(iso: string): string {
 }
 
 function toSession(dto: ChatSessionDto): ChatSession {
-  return { id: dto.id, title: dto.title, updatedLabel: formatRelative(dto.updatedAt) }
+  return {
+    id: dto.id,
+    title: dto.title,
+    updatedLabel: formatRelative(dto.updatedAt),
+  }
 }
 
 export const sessionsKey = (projectId: string) =>
@@ -128,6 +132,8 @@ export type ChatMessage = {
   status: "complete" | "stopped" | "failed"
   /** Set when this answer supersedes an earlier one (CONTEXT §4.6); else null. */
   regeneratedFrom: string | null
+  /** The answer model that produced this turn (ADR-0010). Null on user turns. */
+  modelId: string | null
   citations: Citation[]
 }
 
@@ -167,6 +173,7 @@ export function useMessages(sessionId: string | undefined) {
         content: m.content,
         status: m.status,
         regeneratedFrom: m.regeneratedFrom,
+        modelId: m.modelId,
         citations: m.citations,
       }))
     },
@@ -243,7 +250,7 @@ export function useChatStream(projectId: string) {
     async (
       url: string,
       body: unknown,
-      opts: { seed: PendingTurn; sessionId?: string; isNewSession: boolean },
+      opts: { seed: PendingTurn; sessionId?: string; isNewSession: boolean }
     ) => {
       setPending(opts.seed)
       let sessionId = opts.sessionId
@@ -279,7 +286,7 @@ export function useChatStream(projectId: string) {
             } else if (event === "delta") {
               const text = data.text as string
               setPending((p) =>
-                p ? { ...p, assistantText: p.assistantText + text } : p,
+                p ? { ...p, assistantText: p.assistantText + text } : p
               )
             }
             // `done` needs no client work: the message is already persisted; the
@@ -302,7 +309,7 @@ export function useChatStream(projectId: string) {
                 error:
                   err instanceof Error ? err.message : "Something went wrong.",
               }
-            : p,
+            : p
         )
       } finally {
         if (controllerRef.current === controller) controllerRef.current = null
@@ -313,12 +320,14 @@ export function useChatStream(projectId: string) {
         if (id) {
           await queryClient.invalidateQueries({ queryKey: messagesKey(id) })
         }
-        await queryClient.invalidateQueries({ queryKey: sessionsKey(projectId) })
+        await queryClient.invalidateQueries({
+          queryKey: sessionsKey(projectId),
+        })
         queryClient.invalidateQueries({ queryKey: ["projects"] })
         setPending(null)
       }
     },
-    [projectId, navigate, queryClient],
+    [projectId, navigate, queryClient]
   )
 
   const send = useCallback(
@@ -335,9 +344,9 @@ export function useChatStream(projectId: string) {
           seed: { userContent: input.content, assistantText: "" },
           sessionId: input.sessionId,
           isNewSession: !input.sessionId,
-        },
+        }
       ),
-    [projectId, runStream],
+    [projectId, runStream]
   )
 
   const regenerate = useCallback(
@@ -349,9 +358,9 @@ export function useChatStream(projectId: string) {
           seed: { assistantText: "", regeneratingFrom: input.messageId },
           sessionId: input.sessionId,
           isNewSession: false,
-        },
+        }
       ),
-    [projectId, runStream],
+    [projectId, runStream]
   )
 
   const stop = useCallback(() => controllerRef.current?.abort(), [])
