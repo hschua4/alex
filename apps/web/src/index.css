@@ -42,6 +42,17 @@
   --success: oklch(0.55 0.14 150);
   --warning: oklch(0.62 0.15 65);
 
+  /*
+    Citation ochre — the in-app counterpart to the landing's `--mark`. Same hue
+    (72), but `--mark` is pinned light for the dark landing surface, so it can't
+    be reused verbatim on a near-white app background. These are lightness-
+    tuned per theme to clear 4.5:1 on `--card`. Reserved, like `--mark`, for
+    citation numerals and the affordances that open them — nothing else.
+  */
+  --citation: oklch(0.49 0.12 72);
+  --citation-foreground: oklch(1 0 0);
+  --citation-subtle: oklch(0.955 0.03 72);
+
   --border: oklch(0.915 0.004 264);
   --input: oklch(0.9 0.004 264);
   --ring: oklch(0.55 0.19 264);
@@ -114,6 +125,10 @@
   --success: oklch(0.62 0.13 150);
   --warning: oklch(0.68 0.14 65);
 
+  --citation: oklch(0.78 0.13 72);
+  --citation-foreground: oklch(0.19 0.02 72);
+  --citation-subtle: oklch(0.32 0.05 72);
+
   --border: oklch(0.3 0.012 264);
   --input: oklch(0.34 0.014 264);
   --ring: oklch(0.62 0.17 264);
@@ -157,6 +172,9 @@
   --color-destructive-foreground: var(--destructive-foreground);
   --color-success: var(--success);
   --color-warning: var(--warning);
+  --color-citation: var(--citation);
+  --color-citation-foreground: var(--citation-foreground);
+  --color-citation-subtle: var(--citation-subtle);
   --color-border: var(--border);
   --color-input: var(--input);
   --color-ring: var(--ring);

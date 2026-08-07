@@ -360,7 +360,7 @@ function MessageBubble({
                 key={cite.n}
                 type="button"
                 onClick={onOpenSources}
-                className="inline-flex h-[26px] max-w-[230px] items-center gap-1.5 rounded-lg border bg-card px-2.5 text-xs transition-colors hover:border-primary"
+                className="inline-flex h-[26px] max-w-[230px] items-center gap-1.5 rounded-lg border bg-card px-2.5 text-xs transition-colors hover:border-citation"
               >
                 <CitationNumber n={cite.n} />
                 <span className="truncate font-medium text-foreground/75">
@@ -377,7 +377,7 @@ function MessageBubble({
 
 function CitationNumber({ n }: { n: number }) {
   return (
-    <span className="flex size-4 shrink-0 items-center justify-center rounded-[5px] bg-accent text-[10px] font-bold text-accent-foreground">
+    <span className="flex size-4 shrink-0 items-center justify-center rounded-[5px] bg-citation-subtle text-[10px] font-bold text-citation">
       {n}
     </span>
   )
@@ -620,7 +620,7 @@ function SidePanel({
             {sources.map((source) => (
               <div key={source.n} className="overflow-hidden rounded-xl border">
                 <div className="flex items-center gap-2.5 border-b bg-secondary px-3 py-2.5">
-                  <span className="flex size-5 shrink-0 items-center justify-center rounded-md bg-primary text-[11px] font-bold text-primary-foreground">
+                  <span className="flex size-5 shrink-0 items-center justify-center rounded-md bg-citation text-[11px] font-bold text-citation-foreground">
                     {source.n}
                   </span>
                   <div className="min-w-0 flex-1">

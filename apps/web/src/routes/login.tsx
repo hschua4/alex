@@ -13,6 +13,7 @@ import {
 } from "@/components/ui/card"
 import { Field, FieldError, FieldLabel } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
+import { Wordmark } from "@/components/wordmark"
 
 type Mode = "sign-in" | "register"
 
@@ -57,9 +58,10 @@ export function LoginScreen() {
     <div className="flex min-h-svh items-center justify-center bg-background p-6">
       <div className="w-full max-w-[400px]">
         <div className="mb-7 flex flex-col items-center gap-3 text-center">
-          <div className="flex size-12 items-center justify-center rounded-[13px] bg-primary text-xl font-extrabold text-primary-foreground">
-            R
-          </div>
+          <Wordmark
+            className="text-[19px] text-foreground"
+            bracketClassName="text-citation"
+          />
           <div>
             <h1 className="text-[22px] font-bold tracking-tight">
               {registering ? "Create your account" : "Welcome back"}

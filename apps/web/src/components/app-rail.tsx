@@ -4,6 +4,7 @@ import { NavLink, useNavigate } from "react-router-dom"
 import { signOut, useSession } from "@/lib/auth-client"
 import { useHealth } from "@/lib/use-health"
 import { cn } from "@/lib/utils"
+import { WordmarkGlyph } from "@/components/wordmark"
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -16,9 +17,7 @@ import {
 export function AppRail() {
   return (
     <nav className="flex w-[60px] shrink-0 flex-col items-center gap-2 bg-rail py-4">
-      <div className="mb-3.5 flex size-[34px] items-center justify-center rounded-[9px] bg-primary text-base font-extrabold text-primary-foreground">
-        R
-      </div>
+      <WordmarkGlyph className="mb-3.5 text-white" />
 
       <RailLink to="/app" label="Projects" icon={LayoutGrid} end />
       <RailButton label="Search" icon={Search} />

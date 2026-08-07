@@ -48,7 +48,7 @@ function withCitations(children: ReactNode, onClick?: () => void): ReactNode {
           key={i}
           type="button"
           onClick={onClick}
-          className="mx-0.5 -translate-y-1 align-super text-[10px] font-bold text-primary hover:underline"
+          className="mx-0.5 -translate-y-1 align-super text-[10px] font-bold text-citation hover:underline"
         >
           [{match[1]}]
         </button>

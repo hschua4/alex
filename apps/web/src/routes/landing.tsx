@@ -6,6 +6,7 @@ import { useSession } from "@/lib/auth-client"
 import { cn } from "@/lib/utils"
 import { LandingAnswer } from "@/components/landing-answer"
 import { LandingDemo } from "@/components/landing-demo"
+import { Wordmark } from "@/components/wordmark"
 
 /**
  * Public marketing page at "/" (the app itself lives under /app, behind the
@@ -66,7 +67,7 @@ function SiteNav() {
       )}
     >
       <div className="mx-auto flex h-[70px] max-w-[1180px] items-center gap-8 px-6">
-        <Wordmark />
+        <Wordmark className="text-paper" />
         <nav className="hidden items-center gap-7 font-mono text-[11.5px] tracking-[0.1em] text-paper/55 uppercase md:flex">
           <a href="#demo" className="transition-colors hover:text-paper">
             Demo
@@ -97,20 +98,6 @@ function SiteNav() {
         </Link>
       </div>
     </header>
-  )
-}
-
-/**
- * The mark is the citation bracket itself — the one idea the product is built
- * on. (The in-app rail still shows the prototype's "R".)
- */
-function Wordmark() {
-  return (
-    <span className="flex items-baseline gap-1.5 font-mono text-[15px] font-semibold tracking-tight text-paper">
-      <span className="text-mark">[</span>
-      alex
-      <span className="text-mark">]</span>
-    </span>
   )
 }
 
@@ -633,7 +620,7 @@ function SiteFooter() {
           </p>
 
           <div className="mt-10 flex flex-wrap items-center gap-x-6 gap-y-3">
-            <Wordmark />
+            <Wordmark className="text-paper" />
             <span className="font-mono text-[11.5px] text-paper/35">
               Grounded document chat · invite-only preview
             </span>
