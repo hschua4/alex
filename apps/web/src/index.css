@@ -76,6 +76,15 @@
   --paper: oklch(0.972 0.006 85);
   --paper-2: oklch(0.938 0.009 80);
   --mark: oklch(0.79 0.14 72);
+
+  /*
+    The demo frame renders a miniature of the app, so it needs the app's own
+    indigo and its "indexed" green. Pinned here rather than read from --primary
+    /--success so the walkthrough stays theme-independent like the rest of the
+    landing surface. Neither may stand in for --mark.
+  */
+  --lp-accent: oklch(0.55 0.19 264);
+  --lp-ok: oklch(0.58 0.13 150);
 }
 
 .dark {
@@ -176,6 +185,8 @@
   --color-paper: var(--paper);
   --color-paper-2: var(--paper-2);
   --color-mark: var(--mark);
+  --color-lp-accent: var(--lp-accent);
+  --color-lp-ok: var(--lp-ok);
 
   --font-sans: "Plus Jakarta Sans Variable", system-ui, sans-serif;
   --font-mono: "JetBrains Mono Variable", ui-monospace, monospace;

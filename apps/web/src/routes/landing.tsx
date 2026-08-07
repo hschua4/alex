@@ -1,10 +1,11 @@
 import { useEffect, useRef, useState, type ReactNode } from "react"
-import { ArrowRight, Check, Lock } from "lucide-react"
+import { ArrowRight, Check, Lock, Play } from "lucide-react"
 import { Link, Navigate } from "react-router-dom"
 
 import { useSession } from "@/lib/auth-client"
 import { cn } from "@/lib/utils"
 import { LandingAnswer } from "@/components/landing-answer"
+import { LandingDemo } from "@/components/landing-demo"
 
 /**
  * Public marketing page at "/" (the app itself lives under /app, behind the
@@ -33,6 +34,7 @@ export function LandingScreen() {
       <Hero />
       <Ticker />
       <Principles />
+      <Demo />
       <HowItWorks />
       <CitationAnatomy />
       <SpecSheet />
@@ -66,6 +68,9 @@ function SiteNav() {
       <div className="mx-auto flex h-[70px] max-w-[1180px] items-center gap-8 px-6">
         <Wordmark />
         <nav className="hidden items-center gap-7 font-mono text-[11.5px] tracking-[0.1em] text-paper/55 uppercase md:flex">
+          <a href="#demo" className="transition-colors hover:text-paper">
+            Demo
+          </a>
           <a href="#how" className="transition-colors hover:text-paper">
             How it works
           </a>
@@ -166,10 +171,11 @@ function Hero() {
               Sign in to Alex
             </Link>
             <a
-              href="#how"
+              href="#demo"
               className="inline-flex items-center gap-2 rounded-[10px] border border-white/15 px-5 py-3 text-[14.5px] font-medium text-paper/80 transition-colors hover:border-white/35 hover:text-paper"
             >
-              See how an answer is made
+              <Play className="size-3.5 fill-current" />
+              Watch an answer get made
             </a>
           </div>
 
@@ -281,6 +287,43 @@ function Principles() {
             </div>
           </Reveal>
         ))}
+      </div>
+    </section>
+  )
+}
+
+/* ── Demo ───────────────────────────────────────────────────────────────── */
+
+function Demo() {
+  return (
+    <section
+      id="demo"
+      className="lp-grain relative scroll-mt-20 overflow-hidden bg-ink text-paper"
+    >
+      <div className="lp-ruled absolute inset-0 text-white/70" aria-hidden />
+
+      <div className="relative mx-auto max-w-[1180px] px-6 py-24 lg:py-32">
+        <Reveal>
+          <p className="font-mono text-[11px] tracking-[0.22em] text-mark uppercase">
+            The whole thing, end to end
+          </p>
+          <h2 className="lp-display mt-5 max-w-[17ch] text-[clamp(2rem,4.2vw,3.4rem)] font-semibold">
+            Watch an answer get made.
+          </h2>
+          <p className="mt-6 max-w-[46rem] text-[15.5px] leading-relaxed text-paper/60">
+            Thirty seconds from a file landing in the workspace to a claim you
+            can check — upload, scope, ask, retrieve, answer, verify. A
+            walkthrough of the real flow with sample documents, not a screen
+            recording; the numbers on screen are the ones the product actually
+            runs on.
+          </p>
+        </Reveal>
+
+        <Reveal delay={140}>
+          <div className="mx-auto mt-14 max-w-[1000px]">
+            <LandingDemo />
+          </div>
+        </Reveal>
       </div>
     </section>
   )
