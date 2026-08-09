@@ -9,6 +9,32 @@
       content="Alex — chat with your documents. Grounded answers with citations."
     />
     <title>Alex</title>
+
+    <!--
+      Link unfurls. og.png is rendered from scripts/og-image.html (`pnpm og`);
+      re-run that after editing the card. Absolute URLs are required — most
+      scrapers do not resolve relative ones.
+    -->
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="Alex" />
+    <meta property="og:url" content="https://alex.hschua.com/" />
+    <meta
+      property="og:title"
+      content="Alex — ask your documents, check every claim"
+    />
+    <meta
+      property="og:description"
+      content="Answers drawn only from the documents you put in scope — every claim marked back to the page it came from."
+    />
+    <meta property="og:image" content="https://alex.hschua.com/og.png" />
+    <meta property="og:image:type" content="image/png" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta
+      property="og:image:alt"
+      content="Alex — ask your documents. Check every claim. A citation marker [3] resolving to a document, page, chunk, and snippet."
+    />
+    <meta name="twitter:card" content="summary_large_image" />
   </head>
   <body>
     <div id="root"></div>

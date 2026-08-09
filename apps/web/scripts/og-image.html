@@ -1,0 +1,322 @@
+<!doctype html>
+<!--
+  Source for public/og.png — the 1200×630 card unfurled by Slack, iMessage,
+  X, LinkedIn et al. Rendered, not hand-drawn: `pnpm og` screenshots this file
+  with headless Chrome (see scripts/render-og.mjs), so the card stays in step
+  with the landing sheet it borrows from.
+
+  Same fixed ink/paper palette and type as routes/landing.tsx, and the same one
+  rule: ochre (`--mark`) belongs to citation markers and nothing else.
+
+  Fonts are pulled straight out of node_modules so the card can be re-rendered
+  offline; nothing here is fetched from the network.
+-->
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Alex — OG card source</title>
+    <style>
+      @font-face {
+        font-family: "Fraunces";
+        font-weight: 100 900;
+        font-display: block;
+        src: url("../node_modules/@fontsource-variable/fraunces/files/fraunces-latin-standard-normal.woff2")
+          format("woff2-variations");
+      }
+      @font-face {
+        font-family: "Plus Jakarta Sans";
+        font-weight: 100 900;
+        font-display: block;
+        src: url("../node_modules/@fontsource-variable/plus-jakarta-sans/files/plus-jakarta-sans-latin-wght-normal.woff2")
+          format("woff2-variations");
+      }
+      @font-face {
+        font-family: "JetBrains Mono";
+        font-weight: 100 800;
+        font-display: block;
+        src: url("../node_modules/@fontsource-variable/jetbrains-mono/files/jetbrains-mono-latin-wght-normal.woff2")
+          format("woff2-variations");
+      }
+
+      :root {
+        --ink: oklch(0.17 0.014 264);
+        --paper: oklch(0.972 0.006 85);
+        --mark: oklch(0.79 0.14 72);
+      }
+
+      * {
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
+      }
+
+      html,
+      body {
+        width: 1200px;
+        height: 630px;
+      }
+
+      body {
+        position: relative;
+        overflow: hidden;
+        background: var(--ink);
+        color: var(--paper);
+        font-family: "JetBrains Mono", ui-monospace, monospace;
+        -webkit-font-smoothing: antialiased;
+      }
+
+      /* Ruled sheet — same 34px rhythm as .lp-ruled. */
+      .ruled {
+        position: absolute;
+        inset: 0;
+        background-image: repeating-linear-gradient(
+          to bottom,
+          rgb(255 255 255 / 0.055) 0 1px,
+          transparent 1px 34px
+        );
+      }
+
+      /* The indigo bloom from the hero, tucked behind the citation card. */
+      .bloom {
+        position: absolute;
+        top: -220px;
+        right: -160px;
+        width: 760px;
+        height: 760px;
+        border-radius: 50%;
+        opacity: 0.55;
+        filter: blur(120px);
+        background: radial-gradient(
+          circle,
+          oklch(0.55 0.19 264 / 0.6),
+          transparent 65%
+        );
+      }
+
+      /* Paper tooth, above the ground and under the type. */
+      .grain {
+        position: absolute;
+        inset: 0;
+        opacity: 0.35;
+        mix-blend-mode: overlay;
+        background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='3'/%3E%3C/filter%3E%3Crect width='140' height='140' filter='url(%23n)' opacity='0.35'/%3E%3C/svg%3E");
+      }
+
+      .card {
+        position: relative;
+        display: flex;
+        height: 100%;
+        flex-direction: column;
+        padding: 58px 64px 52px;
+      }
+
+      /* ── Masthead ─────────────────────────────────────────────────────── */
+
+      .masthead {
+        display: flex;
+        align-items: baseline;
+        gap: 20px;
+      }
+
+      .wordmark {
+        font-size: 26px;
+        font-weight: 600;
+        letter-spacing: -0.02em;
+      }
+      .wordmark .bracket {
+        color: var(--mark);
+        padding: 0 3px;
+      }
+
+      .kicker {
+        margin-left: auto;
+        font-size: 15px;
+        font-weight: 500;
+        letter-spacing: 0.22em;
+        text-transform: uppercase;
+        color: oklch(0.79 0.14 72 / 0.9);
+      }
+
+      /* ── Headline ─────────────────────────────────────────────────────── */
+
+      .body {
+        display: flex;
+        flex: 1;
+        align-items: center;
+        gap: 56px;
+        padding-top: 34px;
+      }
+
+      h1 {
+        font-family: "Fraunces", ui-serif, Georgia, serif;
+        font-variation-settings: "opsz" 100;
+        font-weight: 600;
+        font-size: 82px;
+        line-height: 0.94;
+        letter-spacing: -0.032em;
+        font-synthesis-weight: none;
+      }
+      h1 .marked {
+        color: var(--mark);
+      }
+      h1 sup {
+        font-family: "JetBrains Mono", monospace;
+        font-size: 0.22em;
+        font-weight: 600;
+        vertical-align: super;
+        color: oklch(0.79 0.14 72 / 0.75);
+        margin-left: 6px;
+      }
+
+      .lede {
+        margin-top: 30px;
+        max-width: 34ch;
+        font-family: "Plus Jakarta Sans", ui-sans-serif, system-ui, sans-serif;
+        font-size: 19px;
+        line-height: 1.55;
+        color: oklch(0.972 0.006 85 / 0.62);
+      }
+
+      /* ── Citation card — [3] resolving to a passage ───────────────────── */
+
+      .citation {
+        flex: none;
+        width: 360px;
+        border: 1px solid rgb(255 255 255 / 0.13);
+        border-radius: 18px;
+        background: rgb(255 255 255 / 0.035);
+        padding: 26px 26px 8px;
+        transform: rotate(0.7deg);
+      }
+
+      .citation-head {
+        display: flex;
+        align-items: center;
+        gap: 16px;
+      }
+      .citation-head .n {
+        font-family: "Fraunces", ui-serif, Georgia, serif;
+        font-variation-settings: "opsz" 100;
+        font-size: 64px;
+        font-weight: 600;
+        line-height: 0.85;
+        letter-spacing: -0.03em;
+        color: var(--mark);
+      }
+      .citation-head .resolves {
+        font-size: 11px;
+        line-height: 1.5;
+        letter-spacing: 0.12em;
+        text-transform: uppercase;
+        color: oklch(0.972 0.006 85 / 0.42);
+      }
+
+      .row {
+        display: grid;
+        grid-template-columns: 84px 1fr;
+        gap: 14px;
+        border-top: 1px solid rgb(255 255 255 / 0.1);
+        padding: 12px 0;
+      }
+      .row dt {
+        font-size: 10px;
+        letter-spacing: 0.11em;
+        text-transform: uppercase;
+        color: oklch(0.972 0.006 85 / 0.42);
+        line-height: 1.5;
+      }
+      .row dd {
+        font-size: 12.5px;
+        line-height: 1.5;
+        color: oklch(0.972 0.006 85 / 0.86);
+      }
+      .rows {
+        margin-top: 22px;
+      }
+
+      /* ── Footer strip ─────────────────────────────────────────────────── */
+
+      .strip {
+        display: flex;
+        align-items: center;
+        gap: 18px;
+        border-top: 1px solid rgb(255 255 255 / 0.12);
+        padding-top: 22px;
+        font-size: 14px;
+        letter-spacing: 0.02em;
+        color: oklch(0.972 0.006 85 / 0.45);
+      }
+      .strip .dot {
+        color: var(--mark);
+        font-size: 10px;
+      }
+      .strip .url {
+        margin-left: auto;
+        color: oklch(0.972 0.006 85 / 0.7);
+      }
+    </style>
+  </head>
+  <body>
+    <div class="ruled"></div>
+    <div class="bloom"></div>
+    <div class="grain"></div>
+
+    <div class="card">
+      <div class="masthead">
+        <span class="wordmark"
+          ><span class="bracket">[</span>alex<span class="bracket"
+            >]</span
+          ></span
+        >
+        <span class="kicker">Invite-only preview</span>
+      </div>
+
+      <div class="body">
+        <div>
+          <h1>
+            Ask your documents.<br />
+            <span class="marked">Check every claim.<sup>[1]</sup></span>
+          </h1>
+          <p class="lede">
+            Answers drawn only from the documents you put in scope — every claim
+            marked back to the page it came from.
+          </p>
+        </div>
+
+        <div class="citation">
+          <div class="citation-head">
+            <span class="n">[3]</span>
+            <span class="resolves">resolves<br />to</span>
+          </div>
+          <dl class="rows">
+            <div class="row">
+              <dt>Document</dt>
+              <dd>Pricing_Strategy_Q3.pdf</dd>
+            </div>
+            <div class="row">
+              <dt>Page</dt>
+              <dd>12</dd>
+            </div>
+            <div class="row">
+              <dt>Chunk</dt>
+              <dd>4 of 118</dd>
+            </div>
+            <div class="row">
+              <dt>Snippet</dt>
+              <dd>“…the enterprise floor holds at $2,400…”</dd>
+            </div>
+          </dl>
+        </div>
+      </div>
+
+      <div class="strip">
+        <span>PDF &amp; DOCX</span>
+        <span class="dot">◆</span>
+        <span>top-k 8 passages</span>
+        <span class="dot">◆</span>
+        <span>page-level citations</span>
+        <span class="url">alex.hschua.com</span>
+      </div>
+    </div>
+  </body>
+</html>
