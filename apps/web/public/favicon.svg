@@ -1,5 +1,17 @@
+<!--
+  The rail glyph at tab size: white `a` inside ochre citation brackets on the
+  rail's dark ground. Fixed colors, like the rail itself, so the mark reads the
+  same in a light or dark browser chrome.
+
+  The brackets are paths, not text — they are the identity, and they must not
+  depend on a font the tab renderer may not have.
+-->
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
-  <rect width="32" height="32" rx="8" fill="oklch(0.55 0.19 264)" />
-  <text x="16" y="22" font-family="'Plus Jakarta Sans', system-ui, sans-serif"
-        font-size="18" font-weight="800" fill="#fff" text-anchor="middle">R</text>
+  <rect width="32" height="32" rx="7" fill="oklch(0.22 0.012 264)" />
+  <g fill="none" stroke="oklch(0.79 0.14 72)" stroke-width="2">
+    <path d="M11 8.5H8.5v15H11" />
+    <path d="M21 8.5h2.5v15H21" />
+  </g>
+  <text x="16" y="20.5" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace"
+        font-size="16" font-weight="600" fill="#fff" text-anchor="middle">a</text>
 </svg>
