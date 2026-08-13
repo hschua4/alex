@@ -104,7 +104,7 @@ jobs:
         with:
           context: .
           push: true
-          # Public Umami Cloud website id, compiled into the SPA (DEPLOY.md
+          # Public Umami website id, compiled into the SPA (DEPLOY.md
           # #1.5). A repo variable, not a secret — it is visible in the bundle.
           # Unset resolves to an empty string, which ships no tracker.
           build-args: |

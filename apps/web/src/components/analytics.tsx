@@ -12,13 +12,13 @@ import { useLocation } from "react-router-dom"
  * a navigation into /app sends nothing. Signed-in visitors are redirected off
  * "/" before it paints, so in practice this measures anonymous traffic.
  *
- * Configured at build time by VITE_UMAMI_WEBSITE_ID (see env.d.ts). Unset in
- * dev, so `pnpm dev` never pollutes the stats.
+ * Points at the self-hosted Umami at analytics.hschua.com, and is switched on at
+ * build time by VITE_UMAMI_WEBSITE_ID (see env.d.ts). Unset in dev, so
+ * `pnpm dev` never pollutes the stats.
  */
 
 const WEBSITE_ID = import.meta.env.VITE_UMAMI_WEBSITE_ID
-const SCRIPT_SRC =
-  import.meta.env.VITE_UMAMI_SRC ?? "https://cloud.umami.is/script.js"
+const SCRIPT_SRC = "https://analytics.hschua.com/script.js"
 
 const TRACKED_PATHS = new Set(["/", "/login"])
 

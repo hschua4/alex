@@ -6,12 +6,11 @@
  */
 interface ImportMetaEnv {
   /**
-   * Umami Cloud website id. Unset — the default in dev and in any image built
-   * without the build-arg — means no tracker is loaded at all.
+   * Website id from the self-hosted Umami at analytics.hschua.com. Unset — the
+   * default in dev and in any image built without the build-arg — means no
+   * tracker is loaded at all.
    */
   readonly VITE_UMAMI_WEBSITE_ID?: string
-  /** Tracker origin. Only set this when self-hosting Umami. */
-  readonly VITE_UMAMI_SRC?: string
 }
 
 interface ImportMeta {

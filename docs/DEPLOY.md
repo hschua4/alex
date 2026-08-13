@@ -115,10 +115,10 @@ the `production` environment, because the image job reads it:
 
 | Variable | Value |
 |---|---|
-| `UMAMI_WEBSITE_ID` | Website id from the Umami Cloud dashboard for `alex.hschua.com` |
+| `UMAMI_WEBSITE_ID` | Website id for `alex.hschua.com`, from the self-hosted Umami at `analytics.hschua.com` |
 
 ```bash
-gh variable set UMAMI_WEBSITE_ID --body "<uuid from umami cloud>"
+gh variable set UMAMI_WEBSITE_ID --body "<uuid from analytics.hschua.com>"
 ```
 
 It is passed to the image build as a `VITE_` build-arg and compiled into the
@@ -127,9 +127,11 @@ Leave it unset and the app ships with no tracker. Only `/` and `/login` are
 tracked — the tracker is never loaded inside the app, whose paths carry project
 and chat ids (`apps/web/src/components/analytics.tsx`).
 
-If `secure-headers@file` in Traefik sets a `Content-Security-Policy`, it needs
-`https://cloud.umami.is` in both `script-src` and `connect-src` or the tracker
-is blocked in the browser (the page itself keeps working).
+The tracker origin (`https://analytics.hschua.com`) is a constant in that file,
+not a variable — self-hosting is the only configuration. If `secure-headers@file`
+in Traefik sets a `Content-Security-Policy`, it needs that origin in both
+`script-src` and `connect-src` or the tracker is blocked in the browser (the
+page itself keeps working).
 
 ---
 
