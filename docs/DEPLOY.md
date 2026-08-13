@@ -110,6 +110,27 @@ ssh-keyscan <exact VPS_HOST value> | gh secret set VPS_SSH_KNOWN_HOSTS --env pro
 No application secrets go in GitHub: CI never holds prod credentials
 (skylab decision #9).
 
+**Analytics (optional).** One repo-level *variable* — not a secret, and not on
+the `production` environment, because the image job reads it:
+
+| Variable | Value |
+|---|---|
+| `UMAMI_WEBSITE_ID` | Website id from the Umami Cloud dashboard for `alex.hschua.com` |
+
+```bash
+gh variable set UMAMI_WEBSITE_ID --body "<uuid from umami cloud>"
+```
+
+It is passed to the image build as a `VITE_` build-arg and compiled into the
+SPA, so it is public by design and changing it needs a rebuild, not a restart.
+Leave it unset and the app ships with no tracker. Only `/` and `/login` are
+tracked — the tracker is never loaded inside the app, whose paths carry project
+and chat ids (`apps/web/src/components/analytics.tsx`).
+
+If `secure-headers@file` in Traefik sets a `Content-Security-Policy`, it needs
+`https://cloud.umami.is` in both `script-src` and `connect-src` or the tracker
+is blocked in the browser (the page itself keeps working).
+
 ---
 
 ## 2. First deploy

@@ -104,6 +104,11 @@ jobs:
         with:
           context: .
           push: true
+          # Public Umami Cloud website id, compiled into the SPA (DEPLOY.md
+          # #1.5). A repo variable, not a secret — it is visible in the bundle.
+          # Unset resolves to an empty string, which ships no tracker.
+          build-args: |
+            VITE_UMAMI_WEBSITE_ID=${{ vars.UMAMI_WEBSITE_ID }}
           tags: |
             ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.meta.outputs.tag }}
             ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest

@@ -25,8 +25,14 @@ RUN pnpm install --frozen-lockfile
 
 # ---------------------------------------------------------------------------
 # build — compile the SPA. Only `apps/web/dist` is carried forward.
+#
+# VITE_* values are baked into the bundle here, so they are public by
+# construction — never pass a credential this way. Left empty, the SPA simply
+# ships without a tracker (apps/web/src/components/analytics.tsx).
 # ---------------------------------------------------------------------------
 FROM deps AS build
+ARG VITE_UMAMI_WEBSITE_ID=""
+ENV VITE_UMAMI_WEBSITE_ID=$VITE_UMAMI_WEBSITE_ID
 COPY . .
 RUN pnpm --filter @alex/web build
 
