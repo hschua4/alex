@@ -47,3 +47,10 @@ on every chunk (`UNIQUE(document_id, chunk_index)`).
   itself needs a real-pgvector integration test
   ([ADR-0012](./0012-testing-strategy.md)).
 - Changing chunk size or the embedding model forces a full re-index.
+
+## Implementation note
+
+The code over-fetches **40** candidates, not ~20
+(`OVER_FETCH` in `apps/api/src/chat/retrieval.ts`). With a per-doc cap of 5
+and several selected documents, 20 could be used up by one dominant document
+before the cap had anything to redistribute.

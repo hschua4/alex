@@ -90,7 +90,7 @@ function SiteNav() {
           Sign in
         </Link>
         <Link
-          to="/login"
+          to="/login?mode=register"
           className="group hidden items-center gap-1.5 rounded-[10px] bg-paper px-4 py-2 text-[13.5px] font-semibold text-ink transition-transform hover:-translate-y-px sm:inline-flex"
         >
           Use your invite
@@ -169,7 +169,7 @@ function Hero() {
           <p className="mt-6 animate-in font-mono text-[11.5px] text-paper/40 delay-700 duration-1000 fill-mode-both fade-in motion-reduce:animate-none">
             Have an invite?{" "}
             <Link
-              to="/login"
+              to="/login?mode=register"
               className="text-paper/70 underline underline-offset-4 hover:text-paper"
             >
               Create your account
@@ -586,7 +586,7 @@ function ClosingCta() {
               <ArrowRight className="size-4 transition-transform group-hover:translate-x-0.5" />
             </Link>
             <Link
-              to="/login"
+              to="/login?mode=register"
               className="inline-flex items-center gap-2 rounded-[10px] border border-white/15 px-6 py-3.5 text-[15px] font-medium text-paper/80 transition-colors hover:border-white/35 hover:text-paper"
             >
               Create an account

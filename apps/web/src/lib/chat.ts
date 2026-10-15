@@ -264,6 +264,12 @@ export function useChatStream(projectId: string) {
           body: JSON.stringify(body),
           signal: controller.signal,
         })
+        if (res.status === 429) {
+          const retry = Number(res.headers.get("retry-after")) || 60
+          throw new Error(
+            `You've hit the chat limit. Try again in ${Math.ceil(retry / 60)} min.`
+          )
+        }
         if (!res.ok || !res.body) {
           throw new Error("The answer could not be generated.")
         }

@@ -31,11 +31,18 @@ export {
 export { databaseUrl } from "./env.ts"
 export {
   addInvite,
+  claimInviteCode,
   consumeInvite,
+  createInviteCode,
   deleteInvite,
+  generateInviteCode,
   isInvited,
+  listInviteCodes,
   listInvites,
   normalizeEmail,
+  normalizeInviteCode,
+  revokeInviteCode,
+  type InviteCodeRejection,
 } from "./invite.ts"
 export {
   createProject,
@@ -52,6 +59,7 @@ export {
   document,
   documentStatus,
   invite,
+  inviteCode,
   message,
   messageCitation,
   messageRole,
@@ -65,6 +73,7 @@ export {
   type Chunk,
   type Document,
   type Invite,
+  type InviteCode,
   type Message,
   type MessageCitation,
   type NewChunk,

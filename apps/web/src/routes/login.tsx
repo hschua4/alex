@@ -1,6 +1,6 @@
 import { useState } from "react"
 import { Loader2, Lock } from "lucide-react"
-import { useNavigate } from "react-router-dom"
+import { useNavigate, useSearchParams } from "react-router-dom"
 
 import { signIn, signUp } from "@/lib/auth-client"
 import { Button } from "@/components/ui/button"
@@ -11,7 +11,12 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card"
-import { Field, FieldError, FieldLabel } from "@/components/ui/field"
+import {
+  Field,
+  FieldDescription,
+  FieldError,
+  FieldLabel,
+} from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
 import { Wordmark } from "@/components/wordmark"
 
@@ -19,12 +24,19 @@ type Mode = "sign-in" | "register"
 
 /**
  * Auth screen (ADR-0002). Sign-in for existing users; register is invite-only
- * (ADR-0011) — a non-allowlisted email is rejected by the API and surfaced here.
+ * (ADR-0011) — it needs an invite code (ADR-0013) unless the email was
+ * allowlisted, and the API's refusal is surfaced here. A sign-up link
+ * (`/login?code=XXXX-XXXX`) opens straight into register with the code filled.
  * On success better-auth sets the httpOnly session cookie and we head to "/".
  */
 export function LoginScreen() {
   const navigate = useNavigate()
-  const [mode, setMode] = useState<Mode>("sign-in")
+  const [params] = useSearchParams()
+  const linkCode = params.get("code") ?? ""
+  const [mode, setMode] = useState<Mode>(
+    linkCode || params.get("mode") === "register" ? "register" : "sign-in"
+  )
+  const [inviteCode, setInviteCode] = useState(linkCode)
   const [name, setName] = useState("")
   const [email, setEmail] = useState("")
   const [password, setPassword] = useState("")
@@ -38,7 +50,12 @@ export function LoginScreen() {
     setError(null)
     setPending(true)
     const { error } = registering
-      ? await signUp.email({ name, email, password })
+      ? await signUp.email({
+          name,
+          email,
+          password,
+          inviteCode: inviteCode.trim() || undefined,
+        })
       : await signIn.email({ email, password })
     setPending(false)
 
@@ -68,7 +85,7 @@ export function LoginScreen() {
             </h1>
             <p className="mt-1 text-sm text-muted-foreground">
               {registering
-                ? "Alex is invite-only while in preview."
+                ? "Alex is invite-only while in preview. Use the code you were given."
                 : "Sign in to your workspace."}
             </p>
           </div>
@@ -81,6 +98,26 @@ export function LoginScreen() {
           </CardHeader>
           <CardContent>
             <form onSubmit={onSubmit} className="flex flex-col gap-5">
+              {registering && (
+                <Field>
+                  <FieldLabel htmlFor="invite-code">Invite code</FieldLabel>
+                  <Input
+                    id="invite-code"
+                    name="invite-code"
+                    autoComplete="off"
+                    autoCapitalize="characters"
+                    spellCheck={false}
+                    placeholder="XXXX-XXXX"
+                    value={inviteCode}
+                    onChange={(e) => setInviteCode(e.target.value)}
+                    className="h-10 font-mono tracking-wider uppercase"
+                  />
+                  <FieldDescription>
+                    Invited by email instead? Leave this blank.
+                  </FieldDescription>
+                </Field>
+              )}
+
               {registering && (
                 <Field>
                   <FieldLabel htmlFor="name">Name</FieldLabel>
@@ -163,7 +200,7 @@ export function LoginScreen() {
             </>
           ) : (
             <>
-              Have an invite?{" "}
+              Have an invite code?{" "}
               <button
                 type="button"
                 className="font-medium text-primary hover:underline"

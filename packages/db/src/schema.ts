@@ -281,6 +281,10 @@ export const user = pgTable("user", {
   email: text("email").notNull().unique(),
   emailVerified: boolean("email_verified").notNull().default(false),
   image: text("image"),
+  // The invite code this account registered with (ADR-0013), or null for an
+  // email-allowlist invite. Provenance only: the code's expiry gates sign-up,
+  // never an existing account. A better-auth `additionalFields` input.
+  inviteCode: text("invite_code"),
   createdAt: timestamp("created_at", { withTimezone: true })
     .notNull()
     .default(sql`now()`),
@@ -360,6 +364,26 @@ export const invite = pgTable("invite", {
   consumedAt: timestamp("consumed_at", { withTimezone: true }),
 })
 
+/**
+ * Shareable invite codes (ADR-0013) — the alternative to allowlisting an email
+ * when the operator doesn't know who will sign up (e.g. an interview panel).
+ * A code grants up to `maxUses` sign-ups until `expiresAt`; `uses` is claimed
+ * atomically at registration. Expiry stops new sign-ups only — accounts already
+ * created keep full access. Minted by an operator (`pnpm invite code`).
+ */
+export const inviteCode = pgTable("invite_code", {
+  code: text("code").primaryKey(),
+  label: text("label"),
+  maxUses: integer("max_uses").notNull().default(1),
+  uses: integer("uses").notNull().default(0),
+  expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+  revokedAt: timestamp("revoked_at", { withTimezone: true }),
+  createdAt: timestamp("created_at", { withTimezone: true })
+    .notNull()
+    .default(sql`now()`),
+})
+
 export type User = typeof user.$inferSelect
 export type Session = typeof session.$inferSelect
 export type Invite = typeof invite.$inferSelect
+export type InviteCode = typeof inviteCode.$inferSelect

@@ -35,3 +35,10 @@ PDFs) can run up real money. Single-user builds ignore this; we can't.
   migration.
 - The model allowlist ([ADR-0010](./0010-model-picker.md)) bounds per-request
   worst case; these controls bound aggregate and per-user volume.
+
+## Implementation note
+
+The per-user chat rate limit landed with invite codes
+([ADR-0013](./0013-invite-codes.md)): an in-memory fixed window of 30 turns
+per 10 minutes on chat and regenerate. Invite-only now also accepts expiring
+invite codes alongside the email allowlist.

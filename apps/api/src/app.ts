@@ -34,6 +34,7 @@ import {
 } from "@alex/db"
 
 import type { Auth } from "./auth.ts"
+import { createRateLimiter, type RateLimiter } from "./rate-limit.ts"
 import {
   ANSWER_MODELS,
   buildPrompt,
@@ -91,6 +92,11 @@ export type ApiDeps = {
    * and falls back to the raw question. Faked deterministically in tests.
    */
   condense: Condenser
+  /**
+   * Per-user chat limiter (ADR-0011): chat turns, incl. regenerates. Defaults to
+   * 30 per 10 minutes; injectable so tests can exhaust it.
+   */
+  chatLimiter?: RateLimiter
 }
 
 /** Node has a global `File` (undici); narrow a parsed field to it. */
@@ -299,6 +305,25 @@ function requireAuth(auth: Auth) {
 }
 
 /**
+ * Per-user chat rate limit (ADR-0011), keyed by the authenticated user. Counts
+ * at request time, so a burst of parallel turns can't slip past before any of
+ * them is persisted. Mounted after validation so malformed requests are free.
+ */
+function chatRateLimit(limiter: RateLimiter) {
+  return createMiddleware<{ Variables: Variables }>(async (c, next) => {
+    const hit = limiter.take(c.get("userId"))
+    if (!hit.ok) {
+      c.header("Retry-After", String(hit.retryAfterSec))
+      return c.json(
+        { error: "rate_limited" as const, retryAfterSec: hit.retryAfterSec },
+        429,
+      )
+    }
+    await next()
+  })
+}
+
+/**
  * Build the Hono API. Routes are mounted at the root here and served under
  * `/api` by the server (and the web client's `hc` base), so `AppType` stays
  * prefix-free. `db` and `auth` are injected so tests can supply fakes without a
@@ -307,6 +332,9 @@ function requireAuth(auth: Auth) {
 export function createApi(deps: ApiDeps) {
   const { db, auth, store, enqueueIngest, embedder, answerModel, condense } =
     deps
+  const chatLimiter =
+    deps.chatLimiter ??
+    createRateLimiter({ limit: 30, windowMs: 10 * 60 * 1000 })
 
   const app = new Hono<{ Variables: Variables }>()
 
@@ -636,6 +664,7 @@ export function createApi(deps: ApiDeps) {
       "/projects/:projectId/chat",
       requireAuth(auth),
       zValidator("json", chatTurnSchema),
+      chatRateLimit(chatLimiter),
       async (c) => {
         const userId = c.get("userId")
         const projectId = c.req.param("projectId")
@@ -704,6 +733,7 @@ export function createApi(deps: ApiDeps) {
       "/projects/:projectId/chat/messages/:messageId/regenerate",
       requireAuth(auth),
       zValidator("json", regenerateSchema),
+      chatRateLimit(chatLimiter),
       async (c) => {
         const userId = c.get("userId")
         const projectId = c.req.param("projectId")

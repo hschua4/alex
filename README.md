@@ -7,11 +7,55 @@ questions in **chat sessions**. Each answer is drawn only from the documents you
 select for that turn, and its claims carry numbered `[n]` citations that link
 back to the source passages (document, page, snippet).
 
-Live at [alex.hschua.com](https://alex.hschua.com). Invite-only for v1.
+Live at [alex.hschua.com](https://alex.hschua.com). It's invite-only: if
+you've been given an invite code, register with it at
+[alex.hschua.com/login](https://alex.hschua.com/login?mode=register).
+
+## Engineering highlights
+
+- **Citations are checked, not trusted.** The model is asked to cite with
+  `[n]`. After generation, every marker is checked against the chunks that
+  were actually retrieved. Invented numbers are dropped, and the cited
+  passages are saved with the answer so history survives a re-index
+  ([citations.ts](./apps/api/src/chat/citations.ts),
+  [ADR-0005](./docs/adr/0005-numbered-citations.md)).
+- **Retrieval is fair across documents.** Candidates are over-fetched, each
+  document is capped at 5 chunks so one large file can't crowd out the
+  others, weak matches are dropped below a similarity floor (keeping at least
+  the best one), and the top 8 are kept. The ranking is a pure function and
+  unit-tested without a database
+  ([retrieval.ts](./apps/api/src/chat/retrieval.ts),
+  [ADR-0004](./docs/adr/0004-retrieval-design.md)).
+- **Follow-up questions work.** A follow-up is rewritten into a standalone
+  query before retrieval ("what about the second one?" becomes something
+  searchable), while the answer model still sees the question as it was
+  asked.
+- **Ingestion is async and idempotent.** Uploads are queued with pg-boss and
+  processed in-process (extract, chunk, embed). Retries and re-ingests
+  delete and re-insert in one transaction, so a document is never
+  half-indexed ([ADR-0006](./docs/adr/0006-async-ingestion-pgboss.md)).
+- **Streaming has no race.** Answers are streamed over hand-written SSE. The
+  assistant message and its validated citations are saved before the final
+  `done` event, so the client never refetches stale data. Cancelling a stream
+  keeps the partial answer as `stopped`.
+- **Multi-tenant from day one.** Every query is scoped by `user_id`, and
+  someone else's id returns the same 404 as a missing one
+  ([ADR-0001](./docs/adr/0001-multi-user-tenancy.md)).
+- **Cost is bounded.** The deployment runs on one shared model key, so there
+  are upload and page caps, a server-side model allowlist, per-user chat
+  rate limits, and token usage logged on every answer
+  ([ADR-0011](./docs/adr/0011-cost-and-abuse-controls.md)). Access is by
+  email allowlist or by an expiring, limited-use invite code that is claimed
+  atomically at sign-up
+  ([ADR-0013](./docs/adr/0013-invite-codes.md)).
+- **Types run end to end.** Hono RPC carries the API's types to the React
+  client with no codegen. Tests mock every model but run retrieval and
+  ingestion against real pgvector via Testcontainers. CI gates the deploy on
+  typecheck, lint, migrations and tests.
 
 - **Design context:** [CONTEXT.md](./CONTEXT.md) covers the domain language,
   entities, core flows and constraints.
-- **Decisions:** [docs/adr/](./docs/adr/) records each trade-off as an ADR.
+- **Decisions:** [docs/adr/](./docs/adr/) records each trade-off as an ADR (13 so far).
 - **Deploying:** [docs/DEPLOY.md](./docs/DEPLOY.md) is the runbook.
 
 ## Stack
@@ -105,6 +149,15 @@ pnpm dev              # API on :3000, web on :5173 (proxies /api → :3000)
 
 Open <http://localhost:5173/app> and sign up with the invited email.
 
+Or mint a shareable invite code that expires (ADR-0013). It prints a sign-up
+link with the code filled in:
+
+```bash
+pnpm invite code --days 7 --uses 3 --label "Acme interview"
+pnpm invite codes                # status of every code
+pnpm invite revoke ABCD-EFGH
+```
+
 ## Scripts
 
 Run from the repo root.
@@ -118,7 +171,8 @@ Run from the repo root.
 | `pnpm db:down` | Stop the dev services |
 | `pnpm db:generate` | Generate a migration from schema changes in `packages/db` |
 | `pnpm db:migrate` | Apply migrations |
-| `pnpm invite add <email>` / `list` | Manage the invite allowlist |
+| `pnpm invite add <email>` / `list` | Manage the email invite allowlist |
+| `pnpm invite code` / `codes` / `revoke <code>` | Mint, list, and revoke expiring invite codes |
 | `pnpm typecheck` / `lint` / `test` | Checks across all workspaces |
 
 ## Testing

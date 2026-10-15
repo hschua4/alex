@@ -1,3 +1,4 @@
+import { inferAdditionalFields } from "better-auth/client/plugins"
 import { createAuthClient } from "better-auth/react"
 
 /**
@@ -7,6 +8,13 @@ import { createAuthClient } from "better-auth/react"
  */
 export const authClient = createAuthClient({
   basePath: "/api/auth",
+  // Mirrors the server's `user.additionalFields` so `signUp.email` accepts the
+  // invite code (ADR-0013).
+  plugins: [
+    inferAdditionalFields({
+      user: { inviteCode: { type: "string", required: false, input: true } },
+    }),
+  ],
 })
 
 export const { signIn, signUp, signOut, useSession } = authClient

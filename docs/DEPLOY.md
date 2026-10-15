@@ -176,6 +176,18 @@ docker compose run --rm invite add you@example.com
 docker compose run --rm invite list
 ```
 
+To give access to someone whose email you don't know in advance (e.g. an
+interview panel), mint an expiring invite code (ADR-0013) and send them the
+printed sign-up link:
+
+```bash
+docker compose run --rm invite code --days 7 --uses 3 --label "Acme interview"
+docker compose run --rm invite codes          # status of every code
+docker compose run --rm invite revoke ABCD-EFGH
+```
+
+Expiry stops new sign-ups only; accounts created with the code keep access.
+
 Smoke test: `https://alex.hschua.com/api/health` should return
 `{"status":"ok","db":"up",…}`; then sign up, create a project, upload a PDF,
 watch it reach `indexed`, and ask a question with citations.

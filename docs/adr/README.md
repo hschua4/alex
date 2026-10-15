@@ -21,3 +21,4 @@ Consequences**.
 | [0010](./0010-model-picker.md) | User-selectable answer model, server-allowlisted | Accepted |
 | [0011](./0011-cost-and-abuse-controls.md) | Invite-only + caps + rate limit + usage logging | Accepted |
 | [0012](./0012-testing-strategy.md) | Mocked models in CI, real-pgvector integration tests | Accepted |
+| [0013](./0013-invite-codes.md) | Expiring invite codes alongside the email allowlist | Accepted |
